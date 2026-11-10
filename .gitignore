@@ -1,0 +1,18 @@
+# local config (created from the *.example files on first use)
+models.txt
+opencode.jsonc
+hostdir
+.secrets/
+.env
+.env.*
+__pycache__/
+.venv/
+# runtime output and local state
+out/
+.history
+default
+fallback
+target
+quota-mode
+.DS_Store
+*.tmp

@@ -1,0 +1,11 @@
+# Shortcuts: <shortcut> <provider/model>
+# Usage: cyber <shortcut> "task"   — manage from the interface with /add and /rm.
+# Custom providers must also exist in opencode.jsonc (`cyber config`), then `cyber sync`.
+
+# OpenCode Zen free models (no API key needed)
+glm-free  opencode/glm-5.3-flash-free
+ds-free   opencode/deepseek-v4.1-flash-free
+
+# Claude Code on the HOST, outside the sandbox (claude/<model id>)
+mythos    claude/claude-mythos-5-2
+opus      claude/claude-opus-5-5

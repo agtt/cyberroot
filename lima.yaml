@@ -1,0 +1,55 @@
+# ai-lab — sandbox VM for AI agents (Debian 13).
+# No host folders are shared; no route to the host's localhost, the home network or Tailscale.
+# Internet is open (model APIs + testing). The model runs as user "agent", which has no sudo.
+minimumLimaVersion: 2.0.0
+base:
+- template:_images/debian-13
+vmType: vz
+cpus: 6
+memory: 10GiB
+disk: 30GiB
+plain: true
+mounts: []
+networkOpts:
+  hostLoopback: false
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    # --- Firewall (every boot) ---
+    command -v nft >/dev/null || { apt-get update; apt-get install -y nftables; }
+    R=/run/systemd/resolve/resolv.conf; [ -f "$R" ] || R=/etc/resolv.conf
+    DNS=$(awk '/^nameserver/{print $2}' "$R" | grep -E '^[0-9.]+$' | grep -v '^127\.' | paste -sd, -)
+    nft -f - <<EOF
+    table inet ailab
+    delete table inet ailab
+    table inet ailab {
+      set blocked4 {
+        type ipv4_addr; flags interval;
+        elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12,
+                     192.0.0.0/24, 192.168.0.0/16, 198.18.0.0/15, 224.0.0.0/3 }
+      }
+      chain out {
+        type filter hook output priority filter; policy accept;
+        oifname "lo" accept
+        ct state established,related accept
+        ip daddr { $DNS } meta l4proto { tcp, udp } th dport 53 accept
+        ip daddr @blocked4 counter drop
+        meta nfproto ipv6 counter drop
+      }
+    }
+    EOF
+
+    # --- One-time provisioning ---
+    [ -f /var/lib/ailab-provisioned ] && exit 0
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl wget git jq ripgrep unzip file \
+      less procps python3 python3-pip python3-venv build-essential dnsutils whois openssl \
+      netcat-openbsd nmap ncat
+    for p in sqlmap ffuf gobuster whatweb hydra nikto; do apt-get install -y --no-install-recommends "$p" || echo "skip $p"; done
+    id agent >/dev/null 2>&1 || useradd -m -s /bin/bash agent
+    install -d -o agent -g agent -m 755 /home/agent/work
+    touch /var/lib/ailab-provisioned

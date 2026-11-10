@@ -1,0 +1,38 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // opencode config used INSIDE the sandbox VM (`cyber sync` copies it to /home/agent/.config/opencode/).
+  // The VM is the security boundary (no access to the host or the home network), so permissions are open here.
+  "permissions": [
+    { "action": "external_directory", "resource": "*", "effect": "allow" },
+    { "action": "shell", "resource": "*", "effect": "allow" },
+    { "action": "webfetch", "resource": "*", "effect": "allow" },
+    { "action": "websearch", "resource": "*", "effect": "allow" },
+    { "action": "execute", "resource": "*", "effect": "allow" },
+    { "action": "subagent", "resource": "*", "effect": "allow" },
+    { "action": "skill", "resource": "*", "effect": "allow" },
+    { "action": "edit", "resource": "*", "effect": "allow" },
+  ],
+
+  // Without a provider the first web search asks a question that a non-interactive run cannot answer.
+  // "random" picks any available provider; or name one: "exa" | "tavily" | "firecrawl" | "parallel" | "tinyfish"
+  "websearch": { "provider": "random" },
+
+  "providers": {
+    // Add any OpenAI-compatible service (OpenRouter, Groq, Together, DeepSeek, Mistral, a local vLLM, ...):
+    // 1) cyber key <name>       -> key saved as <name>-api-key and copied to /home/agent/.secrets/ in the VM
+    // 2) uncomment and fill a block like the one below (`cyber config` opens this file and syncs on exit)
+    // 3) /add in the interface lists the provider's models; picking one writes the "models" entry for you
+    //
+    // "openrouter": {
+    //   "name": "OpenRouter",
+    //   "package": "@opencode/ai/providers/openai-compatible",
+    //   "settings": {
+    //     "baseURL": "https://openrouter.ai/api/v1",
+    //     "apiKey": "{file:/home/agent/.secrets/openrouter-api-key}"
+    //   },
+    //   "models": {
+    //   }
+    // }
+  }
+}

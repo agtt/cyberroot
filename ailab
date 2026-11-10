@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+# cyber — runs opencode inside a Lima VM that cannot touch the Mac or the home network.
+# Works from any directory (paths are resolved from this script's location).
+#
+#   cyber                        interface: type a task, "/" for commands (/model /sessions /new /add /rm ...)
+#   cyber resume                 interface, opening with the session picker
+#   cyber "task"                 run with the default model (live output + log)
+#   cyber <shortcut> "task"      run with that model (models.txt)
+#   cyber <provider/model> "task"    run with a model that has no shortcut
+#   cyber -c "keep going"        continue the last session (also: cyber glm -c "...")
+#   cyber use [shortcut]         show / change the default model
+#   cyber fallback [k1 k2 ...]   models to switch to, in order, on limit/error (default: glm-free ds-free)
+#   cyber add <shortcut> <provider/model>   add a shortcut      cyber list | edit   show / edit shortcuts
+#   cyber models [provider]      every model opencode in the VM can see
+#   cyber tui                    opencode's own TUI inside the VM
+#   cyber run -m <model> "..."   raw opencode run (all opencode arguments pass through)
+#   cyber config | key <provider>    edit provider config (opencode.jsonc) / save an API key; both sync to the VM
+#   cyber quota [on|off]          check balances once / opt in or out of automatic checks
+#   cyber pull [all]             copy results from the VM (default: reports and small files; all = everything)
+#   cyber clean                  show disk usage and pick what to delete (asks first)
+#   cyber out                    open the output folder in Finder
+#   cyber up | down | status | sh | sync | reset     VM lifecycle, shell, push config, rebuild
+#   cyber target [local | vps <ssh-host>]   where to run (default: local VM on this Mac)
+#
+# claude/<model> shortcuts (mythos, opus) run Claude Code on the HOST, outside the sandbox.
+# Never stops early: if the model stops before finishing, "continue" is sent automatically in the same session
+# (AILAB_ROUNDS, default 12, 0 = unlimited); on limit/error it switches to the next fallback model.
+# Thinking is shown by default (AILAB_THINKING=0 hides it). Input can be piped: cat x | cyber glm "summarise".
+# Disk: only reports/small files are copied to the Mac; logs older than a day are gzipped; the VM idles off after
+# AILAB_IDLE_MIN minutes (default 60).
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$HERE/platform.sh"
+VM=ai-lab
+OUT="$HERE/out"
+MODELS="$HERE/models.txt"
+CONFIG="$HERE/opencode.jsonc"
+DEFAULT="$HERE/default"
+# Local, untracked files: created from the examples on first use.
+[[ -f "$MODELS" ]] || cp "$HERE/models.example.txt" "$MODELS"
+[[ -f "$CONFIG" ]] || cp "$HERE/opencode.example.jsonc" "$CONFIG"
+# API keys: <provider>-api-key files. CYBER_SECRETS overrides; a ../.secrets next to the repo is used if it exists.
+SECRETS="${CYBER_SECRETS:-}"
+if [[ -z "$SECRETS" ]]; then
+  if [[ ! -d "$HERE/.secrets" && -d "$HERE/../.secrets" ]]; then SECRETS="$(cd "$HERE/../.secrets" && pwd)"; else SECRETS="$HERE/.secrets"; fi
+fi
+# Where host-side Claude Code (claude/<model>) runs: CYBER_HOST_DIR, else ./hostdir, else the current directory.
+HOST_DIR="${CYBER_HOST_DIR:-$(cat "$HERE/hostdir" 2>/dev/null || pwd)}"
+IDLE_MIN="${AILAB_IDLE_MIN:-60}"
+
+TARGET="${AILAB_TARGET:-$(cat "$HERE/target" 2>/dev/null || echo local)}"
+MODE="${TARGET%% *}"; HOST="${TARGET#* }"
+if [[ "$MODE" != vps || -z "$HOST" || "$HOST" == "$MODE" ]]; then MODE=local; HOST=; IDLE=$IDLE_MIN; else IDLE=0; fi
+
+lsh() {
+  if [[ $MODE == local ]]; then
+    limactl shell --workdir / "$VM" "$@"
+  else
+    local t=(); [[ -t 0 && -t 1 ]] && t=(-t)
+    # shellcheck disable=SC2086
+    ssh ${t[@]+"${t[@]}"} ${AILAB_SSH_OPTS:-} -o ServerAliveInterval=30 "$HOST" -- "$(printf '%q ' "$@")"
+  fi
+}
+
+state() {
+  if [[ $MODE == local ]]; then
+    limactl list --format '{{.Status}}' "$VM" 2>/dev/null | head -1 || true
+  else
+    # shellcheck disable=SC2086
+    ssh ${AILAB_SSH_OPTS:-} -o BatchMode=yes -o ConnectTimeout=8 "$HOST" true 2>/dev/null && echo Running || echo Unreachable
+  fi
+}
+
+sync_cfg() {
+  local ver f
+  # opencode version for the VM: OPENCODE_VERSION, else the host's version, else the latest release
+  ver="${OPENCODE_VERSION:-$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)}"
+  ver="${ver:-latest}"
+  lsh sudo bash -s "$ver" "$IDLE" < "$HERE/vm-setup.sh"
+  lsh sudo -u agent sh -c 'cat > /home/agent/.config/opencode/opencode.jsonc' < "$CONFIG"
+  lsh sudo -u agent sh -c 'cat > /home/agent/work/AGENTS.md' < "$HERE/vm-AGENTS.md"
+  for f in "$SECRETS"/*-api-key; do
+    [[ -f "$f" ]] || continue
+    lsh sudo -u agent sh -c "umask 077; cat > /home/agent/.secrets/$(basename "$f")" < "$f"
+  done
+}
+
+up_vps() {
+  [[ "$(state)" == Running ]] || { echo "cannot reach the VPS over ssh: $HOST" >&2; exit 1; }
+  if ! lsh test -f /var/lib/ailab-provisioned 2>/dev/null; then
+    echo "provisioning VPS ($HOST)..." >&2
+    lsh sudo bash -s < "$HERE/vps-setup.sh" >&2
+  fi
+  lsh test -x /usr/local/sbin/ailab-idle 2>/dev/null || sync_cfg
+}
+
+up() {
+  if [[ $MODE == vps ]]; then up_vps; return; fi
+  if [[ -z "$(state)" ]]; then
+    local driver
+    driver="$(local_vm_driver)" || return 1
+    command -v limactl >/dev/null || { echo 'Lima is required for a local VM; install Lima or use: cyber target vps <ssh-host>' >&2; return 1; }
+    if [[ "$driver" == qemu && "$(host_platform)" == wsl2 && ! -r /dev/kvm ]]; then
+      echo 'WSL2: /dev/kvm unavailable; a local QEMU VM may be slow or unavailable. Prefer: cyber target vps <ssh-host>' >&2
+    fi
+    echo "creating the ai-lab VM for the first time (a few minutes)..." >&2
+    limactl create --tty=false --vm-type="$driver" --name "$VM" "$HERE/lima.yaml" >&2
+  fi
+  if [[ "$(state)" != Running ]]; then
+    echo "starting ai-lab..." >&2
+    limactl start --tty=false "$VM" >/dev/null 2>&1
+  fi
+  local i
+  for i in $(seq 1 120); do
+    lsh test -f /var/lib/ailab-provisioned 2>/dev/null && break
+    sleep 5
+  done
+  lsh test -f /var/lib/ailab-provisioned || { echo "provisioning did not finish: limactl shell $VM sudo tail /var/log/cloud-init-output.log" >&2; exit 1; }
+  lsh test -x /usr/local/sbin/ailab-idle 2>/dev/null || sync_cfg
+}
+
+ensure_up() {
+  if [[ $MODE == vps ]]; then lsh test -f /var/lib/ailab-provisioned 2>/dev/null || up_vps
+  else [[ "$(state)" == Running ]] || up; fi
+  if [[ $MODE == local ]]; then
+    # fail closed: without the firewall rules the VM could reach the Mac / home network
+    lsh sudo sh -c 'echo 0 > /run/ailab-idle; nft list table inet ailab 2>/dev/null | grep -q "@blocked4.*drop"' \
+      || { echo "ERROR: the VM firewall (nft inet ailab) is not loaded; refusing to run. Try: cyber down && cyber up" >&2; exit 1; }
+  else
+    lsh sudo sh -c 'echo 0 > /run/ailab-idle'
+  fi
+}
+
+# Copy results VM -> Mac, only what changed since the last pull.
+# Default: reports and small files (<=3 levels deep, <10 MB) so decompile trees / downloads never fill the Mac.
+# `pull all` copies everything.
+pull() {
+  mkdir -p "$OUT"
+  local since=0 now what="${1:-}"
+  [[ -d "$OUT/work" && "$what" != all ]] && since="$(cat "$OUT/.lastpull" 2>/dev/null || echo 0)"
+  now="$(lsh date +%s 2>/dev/null || echo 0)"
+  local copied=0
+  if [[ "$what" == all ]]; then
+    if lsh sudo tar -C /home/agent -cf - work | tar -C "$OUT" -xf -; then copied=1; fi
+  else
+    if lsh sudo bash -o pipefail -c 'cd /home/agent && find work -maxdepth 3 -type f -size -10M -newermt "@$1" -print0 | tar --null -T - -cf -' _ "$since" \
+      | tar -C "$OUT" -xf -; then copied=1; fi
+  fi
+  if (( ! copied )); then
+    echo 'WARNING: result copy failed; last-pull time kept. Retry with: cyber pull' >&2
+    return 0   # preserve the task result; a later pull must retry these files
+  fi
+  if [[ "$what" != all && "$now" =~ ^[0-9]+$ && "$now" -gt 0 ]]; then
+    printf '%s\n' "$now" > "$OUT/.lastpull.tmp.$$"
+    mv "$OUT/.lastpull.tmp.$$" "$OUT/.lastpull"
+  fi
+  return 0
+}
+
+RUN_ID="r$$-$(date +%s)"
+# AILAB_RUN: marker used to find and stop the VM-side process on Ctrl-C (visible on sudo's command line)
+agent() { lsh sudo -u agent -H env TERM="${TERM:-xterm-256color}" AILAB_RUN="$RUN_ID" bash -c 'cd ~/work && exec "$@"' _ "$@"; }
+
+oc() { agent opencode "$@"; }
+
+# opencode run reads stdin until EOF: called from a terminal (stdin = keyboard) it waits forever.
+# So close stdin on a terminal; pass it through when it is a pipe/file (cat x | cyber ...).
+# --standalone: a leftover background service in the VM can make runs hang; each run starts its own server.
+oc_run() { if [[ -t 0 ]]; then oc run --standalone "$@" </dev/null; else oc run --standalone "$@"; fi; }
+
+stop_remote() { lsh sudo pkill -TERM -f "AILAB_RUN=[r]${RUN_ID#r}" 2>/dev/null || true; }
+
+# --- terminal look (colour only when stderr is a terminal and NO_COLOR is unset) ---
+if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+  C_B=$'\e[1m'; C_D=$'\e[2m'; C_R=$'\e[31m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_M=$'\e[35m'; C_C=$'\e[36m'; C_0=$'\e[0m'
+else C_B=; C_D=; C_R=; C_G=; C_Y=; C_M=; C_C=; C_0=; fi
+say()  { printf '%s\n' "$*" >&2; }
+fdur() { local s=$1; if (( s >= 60 )); then printf '%dm%02ds' $((s/60)) $((s%60)); else printf '%ds' "$s"; fi; }
+short_of() { awk -v m="$1" '$2==m && $1 !~ /^#/ {print $1; exit}' "$MODELS"; }
+
+# Quota reads are optional. Cached/local status never starts the VM or calls a model.
+quota_data() {
+  if command -v python3 >/dev/null; then
+    python3 -B "$HERE/quota.py" --config "$CONFIG" --models "$MODELS" --secrets "$SECRETS" --out "$OUT" "$@" 2>/dev/null || true
+  else
+    if [[ "${1:-}" == --model ]]; then echo 'remaining unknown (install Python 3 for quota)'
+    else awk '$1 !~ /^#/ && NF>=2 {printf "%s\t%s\tremaining unknown (Python 3 unavailable)\n", $1, $2}' "$MODELS"; fi
+  fi
+}
+
+quota_auto_refresh() {
+  if [[ "$(cat "$HERE/quota-mode" 2>/dev/null || true)" == on ]]; then quota_data --refresh >/dev/null; fi
+  return 0
+}
+
+# Fallback models, tried in order when a model hits a limit/error (ai-lab/fallback, else the free ones).
+fallbacks() {
+  local f; f="$(cat "$HERE/fallback" 2>/dev/null || true)"
+  [[ -n "$f" ]] || f="glm-free ds-free"
+  local k m; for k in $f; do m="$(resolve "$k")"; [[ -n "$m" ]] && echo "$m"; done
+}
+
+DONE_MARK="CYBER_DONE"
+# No done-marker: continue if the round used tools or ended with a question/offer; a plain answer counts as finished
+ASK_RE='\?[[:space:]]*$|would you like|shall i|let me know|next step|if you want'
+TOOL_RE='^(\$|◈|%|→|✱|⚙|✗) '
+CONT_MSG="Continue from where you left off. Do not ask questions or wait for approval: pick the most sensible option yourself and carry the task through to the end. If nothing is left to do, do not invent new work; write only $DONE_MARK on the last line."
+
+# $1 model, rest: opencode run arguments + task. Auto-continues and falls back (see header).
+run_logged() {
+  local model="$1"; shift
+  mkdir -p "$OUT/logs"
+  find "$OUT/logs" -name '*.log' -mtime +1 -exec gzip -q {} + 2>/dev/null || true   # old logs: compress, never grow
+  local log
+  log="$OUT/logs/$(date +%Y%m%d-%H%M%S)-$$-${model##*/}.log"
+  { echo "# model: $model"; echo "# task: $*"; echo; } > "$log"
+  # --auto: a permission prompt cannot be answered in run mode (the task dies with "Cancelled a request for input"); the VM is the boundary
+  local flags=(--auto); [[ "${AILAB_THINKING:-1}" == 0 ]] || flags+=(--thinking)
+  local max="${AILAB_ROUNDS:-12}" round=1 errs=0 rc=0 delivered=0 t0=$SECONDS before a
+  [[ "$max" =~ ^[0-9]+$ && ${#max} -le 6 ]] || { say 'AILAB_ROUNDS must be an integer from 0 to 999999.'; return 2; }
+  max=$((10#$max))
+  # no session chosen by the user: open our own so later rounds never land in another session
+  local sess=(--session "ses_cyber$(date +%s)x$$") user_sess=0
+  [[ -z "${AILAB_SESSION_ID:-}" ]] || sess=(--session "$AILAB_SESSION_ID")
+  local prev="" cont=()
+  for a in "$@"; do
+    case "$a" in -c|--continue|--fork) sess=(); user_sess=1; cont=(-c) ;; --session=*) sess=(); user_sess=1; cont=("$a") ;; esac
+    case "$prev" in -s|--session) sess=(); user_sess=1; cont=(--session "$a") ;; esac
+    prev="$a"
+  done
+  (( user_sess )) || cont=("${sess[@]}")
+  # skip models that hit a limit in the last 30 min (no point waiting for the same error on every task)
+  local lim="$OUT/.limited" cutoff=$(( $(date +%s) - 1800 )) all=("$model") chain=()
+  while IFS= read -r a; do [[ "$a" == "$model" ]] || all+=("$a"); done < <(fallbacks)
+  for a in "${all[@]}"; do
+    awk -v c="$cutoff" -v m="$a" '$1 > c && $2 == m {f=1} END {exit !f}' "$lim" 2>/dev/null || chain+=("$a")
+  done
+  (( ${#chain[@]} )) || chain=("${all[@]}")
+  [[ "${chain[0]}" == "$model" ]] || say "${C_Y}↻ $model hit its limit recently, starting with ${chain[0]}${C_0}"
+  local mi=0
+
+  local awake_pid=""
+  if command -v caffeinate >/dev/null; then caffeinate -i -w $$ & awake_pid=$!; fi
+  say "${C_M}${C_B}╭─ cyber${C_0} ${C_B}$(short_of "${chain[0]}")${C_0}${C_D} ${chain[0]} · $MODE${HOST:+ $HOST} · max rounds ${max/#0/unlimited}${C_0}"
+  say "${C_M}${C_B}╰─${C_0}${C_D} log: ${log/#$HOME/~}${C_0}"
+  local intr=0 finished=0 error=0 limited=0 needs_continue=0 round_limited=0
+  local pipe_rc=()
+  trap 'intr=1' INT
+  set +e
+  local args=("${sess[@]+"${sess[@]}"}" "$@")
+  while :; do
+    before=$(wc -c < "$log")
+    oc_run -m "${chain[$mi]}" "${flags[@]}" "${args[@]}" 2>&1 | "$HERE/livelog.pl" "$log"
+    pipe_rc=("${PIPESTATUS[@]}"); rc=${pipe_rc[0]}
+    if (( intr )); then say; say "${C_Y}■ stopping...${C_0}"; stop_remote; rc=130; break; fi
+    if (( pipe_rc[1] != 0 )); then say "${C_R}✗ log output failed${C_0}"; rc=1; break; fi
+    # Stream the new round once instead of copying its complete log into a shell variable.
+    if ! read -r finished error limited needs_continue < <(tail -c +$((before + 1)) "$log" | CYBER_ASK_RE="$ASK_RE" CYBER_TOOL_RE="$TOOL_RE" awk -f "$HERE/round-state.awk"); then
+      say "${C_R}✗ could not read round state${C_0}"; rc=1; break
+    fi
+    # Errors take precedence over even a final completion marker.
+    if (( rc != 0 || error )); then
+      errs=$((errs + 1))
+      if (( limited )); then
+        echo "$(date +%s) ${chain[$mi]}" >> "$lim"
+        if (( mi + 1 < ${#chain[@]} )); then
+          mi=$((mi + 1)); say "${C_Y}↻ model limit/error: switching to ${chain[$mi]}${C_0}"
+          continue   # a model switch is not a round; the same message is resent to the new model
+        else
+          say "${C_R}✗ no fallback model left (all limited or failing).${C_0}"
+          say "${C_D}  add a paid fallback, e.g.: cyber fallback glm-free ds-free glm   then: cyber -c \"continue\"${C_0}"
+          rc=1; break
+        fi
+      elif (( errs >= 4 )); then
+        say "${C_R}✗ $errs errors in a row, giving up${C_0}"; rc=1; break
+      else
+        say "${C_Y}↻ error, retrying in 10s ($errs/4)${C_0}"; sleep 10
+        if (( intr )); then rc=130; break; fi
+      fi
+    else
+      errs=0; delivered=1
+      (( finished )) && break
+      # plain answer, no tools, no question/offer: finished
+      (( needs_continue )) || break
+    fi
+    if (( max > 0 && round >= max )); then say "${C_Y}■ round limit ($max) reached. To keep going: cyber -c \"continue\"  (no limit: AILAB_ROUNDS=0)${C_0}"; round_limited=1; rc=2; break; fi
+    round=$((round + 1))
+    say "${C_C}↻ round $round${C_D} · auto-continue${C_0}"
+    # task never reached the model (first round failed): resend it; otherwise send "continue"
+    (( delivered )) && args=("${cont[@]+"${cont[@]}"}" "$CONT_MSG")
+  done
+  if [[ -n "$awake_pid" ]]; then kill "$awake_pid" 2>/dev/null; wait "$awake_pid" 2>/dev/null; fi
+  set -e
+  trap - INT
+  pull
+  local mark="${C_G}${C_B}✔ done${C_0}"; (( rc == 0 )) || mark="${C_R}${C_B}✗ failed (rc=$rc)${C_0}"
+  (( rc != 130 )) || mark="${C_Y}${C_B}■ stopped${C_0}"
+  (( ! round_limited )) || mark="${C_Y}${C_B}■ round limit reached${C_0}"
+  say "$mark${C_D} · $round round(s) · $(fdur $((SECONDS - t0))) · model ${chain[$mi]}${C_0}"
+  say "${C_D}  output: ${OUT/#$HOME/~}/work   log: ${log/#$HOME/~}${C_0}"
+  return "$rc"
+}
+
+# claude/<model>: Claude Code on the host (OUTSIDE the sandbox, in $HOST_DIR). "claude/" = its default model.
+run_host() {
+  local m="${1#claude/}"; shift
+  command -v claude >/dev/null || { say "${C_R}claude command not found${C_0}"; return 1; }
+  say "${C_Y}${C_B}▲ host${C_0}${C_D} Claude Code${m:+ · $m} · outside the sandbox · ${HOST_DIR/#$HOME/~} · exit to come back here${C_0}"
+  if [[ -n "$m" ]]; then (cd "$HOST_DIR" && claude --model "$m" "$@"); else (cd "$HOST_DIR" && claude "$@"); fi
+}
+
+shortcut() { [[ -f "$MODELS" ]] && awk -v k="$1" '$1==k && $1 !~ /^#/ {print $2; exit}' "$MODELS"; }
+
+# shortcut or provider/model -> provider/model (empty if unknown)
+resolve() {
+  local m; m="$(shortcut "$1")"
+  if [[ -n "$m" ]]; then echo "$m"; elif [[ "$1" =~ ^[A-Za-z0-9._-]+/[^[:space:]]+$ ]]; then echo "$1"; fi
+}
+
+# default model: ai-lab/default, else the first shortcut in models.txt
+default_model() {
+  local d; d="$(cat "$DEFAULT" 2>/dev/null || true)"
+  [[ -n "$d" ]] || d="$(awk '$1 !~ /^#/ && NF>=2 {print $2; exit}' "$MODELS")"
+  [[ -n "$d" ]] || { echo "no default model: cyber use <shortcut>" >&2; exit 2; }
+  echo "$d"
+}
+
+OC_SUBCMDS=" upgrade update uninstall acp api debug auth mcp plugin models stats mini session service reload pair serve "
+
+case "${1:-}" in
+  up)     up; sync_cfg; echo "ai-lab ready ($MODE${HOST:+ $HOST})" ;;
+  down)
+    if [[ $MODE == vps ]]; then echo "vps mode: the VPS is not shut down from here (use the provider panel)"; exit 0; fi
+    pull 2>/dev/null || true; limactl stop "$VM" >/dev/null 2>&1; echo "ai-lab stopped" ;;
+  status)
+    echo "target: $MODE${HOST:+ $HOST}"
+    if [[ $MODE == vps ]]; then state; else limactl list "$VM" 2>/dev/null || echo "no ai-lab VM yet (cyber up)"; fi ;;
+  target)
+    case "${2:-}" in
+      "")    echo "$MODE${HOST:+ $HOST}" ;;
+      local) echo local > "$HERE/target"; echo "target: local (isolated Lima VM)" ;;
+      vps)   [[ -n "${3:-}" ]] || { echo "usage: cyber target vps <ssh-host>" >&2; exit 2; }
+             echo "vps $3" > "$HERE/target"; echo "target: vps $3 (provisioned on first use: cyber up)" ;;
+      *)     echo "usage: cyber target [local | vps <ssh-host>]" >&2; exit 2 ;;
+    esac ;;
+  sync)   ensure_up; sync_cfg; echo "synced" ;;
+  sh)     ensure_up; shift; agent bash -l "$@" || true; pull ;;
+  pull)   ensure_up; pull "${2:-}"; echo "$OUT/work" ;;
+  clean)  source "$HERE/ui.sh"; ui_clean ;;
+  resume) source "$HERE/ui.sh"; ui_main resume ;;
+  out)    mkdir -p "$OUT"; open_output "$OUT" ;;
+  list)   source "$HERE/ui.sh"; CUR_MODEL="$(default_model)"; quota_auto_refresh; ui_models_table ;;
+  quota)  source "$HERE/ui.sh"; ui_quota "${2:-}" ;;
+  use)
+    if [[ -z "${2:-}" ]]; then default_model; exit 0; fi
+    m="$(resolve "$2")"; [[ -n "$m" ]] || { echo "unknown shortcut/model: $2 (cyber list)" >&2; exit 2; }
+    echo "$m" > "$DEFAULT"; echo "default model: $m" ;;
+  add)
+    [[ -n "${2:-}" && "${3:-}" == */* ]] || { echo "usage: cyber add <shortcut> <provider/model>" >&2; exit 2; }
+    [[ -z "$(shortcut "$2")" ]] || { echo "shortcut already exists: $2 -> $(shortcut "$2") (cyber edit)" >&2; exit 2; }
+    printf '%-9s %s\n' "$2" "$3" >> "$MODELS"; echo "added: $2 -> $3" ;;
+  edit)   "${EDITOR:-nano}" "$MODELS" ;;
+  config) "${EDITOR:-nano}" "$CONFIG"; if [[ "$(state)" == Running ]]; then sync_cfg; echo "sent to the VM"; fi ;;
+  key)
+    [[ -n "${2:-}" ]] || { echo "usage: cyber key <provider>" >&2; exit 2; }
+    read -r -s -p "$2 API key: " k; echo
+    (umask 077; mkdir -p "$SECRETS"; printf '%s' "$k" > "$SECRETS/$2-api-key")
+    echo "saved: ${SECRETS/#$HOME/~}/$2-api-key"
+    if [[ "$(state)" == Running ]]; then sync_cfg; echo "sent to the VM"; fi ;;
+  reset)
+    [[ $MODE == local ]] || { echo "reset is only for the local VM" >&2; exit 1; }
+    read -r -p "The ai-lab VM will be deleted and rebuilt (including work/ inside it). Sure? [y/N] " a
+    [[ "$a" == y ]] || exit 1
+    limactl delete -f "$VM"; up; sync_cfg ;;
+  fallback)
+    shift
+    if [[ $# -eq 0 ]]; then fallbacks; exit 0; fi
+    for k in "$@"; do [[ -n "$(resolve "$k")" ]] || { echo "unknown shortcut/model: $k" >&2; exit 2; }; done
+    echo "$*" > "$HERE/fallback"; echo "fallback order: $*" ;;
+  -h|--help|help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  run)
+    shift; ensure_up; set +e; oc_run "$@"; rc=$?; set -e; pull; exit "$rc" ;;
+  "")
+    # shellcheck source=ui.sh
+    source "$HERE/ui.sh"; ui_main ;;
+  tui)    ensure_up; shift; oc "$@" || true; pull ;;
+  *)
+    if m="$(resolve "$1")" && [[ -n "$m" ]]; then
+      name="$1"; shift
+      [[ $# -gt 0 ]] || { echo "usage: cyber $name \"task\"   (make it the default: cyber use $name)" >&2; exit 2; }
+      if [[ "$m" == claude/* ]]; then run_host "$m" "$@"; else ensure_up; run_logged "$m" "$@"; fi
+    elif [[ "$OC_SUBCMDS" == *" $1 "* || ( $# -eq 1 && "$1" == -* ) ]]; then
+      ensure_up; oc "$@" || true; pull
+    elif [[ $# -eq 1 && "$1" != *[[:space:]]* ]]; then
+      echo "unknown command/shortcut: $1   (cyber help, cyber list; put a task in quotes)" >&2; exit 2
+    else
+      m="$(default_model)"
+      if [[ "$m" == claude/* ]]; then run_host "$m" "$@"; else ensure_up; run_logged "$m" "$@"; fi
+    fi ;;
+esac
