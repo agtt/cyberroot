@@ -70,6 +70,10 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(self.type_keys(["/s", "\r"]), "/s")
         self.assertEqual(self.type_keys(["/s", "\x1b[B", "\r"]), "/setup")
 
+    def test_ctrl_c_clears_then_exits_on_empty_line(self):
+        self.assertEqual(self.type_keys(["abc", "\x03", "x", "\r"]), "x")
+        self.assertEqual(self.type_keys(["\x03", "\x03"]), "")
+
     def test_tasks_and_history(self):
         self.assertEqual(self.type_keys(["hello", "\x1b[D", "X", "\r"]), "hellXo")
         self.assertEqual(self.type_keys(["\x1b[A", "\r"], history="/models\nold task\n"), "old task")

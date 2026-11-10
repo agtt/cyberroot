@@ -153,7 +153,24 @@ Quota checks are optional and off by default. `/quota` checks once; `/quota on` 
 | `/sh`, `!command` | Guest shell or one guest command |
 | `/claude` | Host Claude Code; outside the sandbox |
 
-Typing `/` lists matching commands under the prompt as you type: `↑`/`↓` pick, `Tab` completes, `Enter` runs the highlighted command, `Esc` hides the list. Set `CYBER_PLAIN_INPUT=1` for the plain readline prompt.
+Typing `/` lists matching commands under the prompt as you type: `↑`/`↓` pick, `Tab` completes, `Enter` runs the highlighted command, `Esc` hides the list. `Ctrl-C` clears the line and, pressed twice on an empty line, exits; `Ctrl-D` exits; `Ctrl-Z` suspends (`fg` resumes). Set `CYBER_PLAIN_INPUT=1` for the plain readline prompt.
+
+`/theme` (or `cyber theme`) switches colours: `root` keeps standard terminal colours with a green logo (default), `matrix` is all green phosphor, `mono` is plain text.
+
+### Recent CVEs
+
+`cyber cve` lists CVEs published in the last 3 days from NVD, newest first, and marks those in CISA's Known Exploited Vulnerabilities catalog with `KEV`. Only these two public feeds are read; responses are cached under `out/.cve` and a stale copy is used when a feed is unreachable.
+
+```bash
+cyber cve                      # last 3 days
+cyber cve wordpress --days 30  # keyword search (all words must match)
+cyber cve --severity critical  # that level and above
+cyber cve --kev --days 30      # CISA known-exploited additions
+cyber cve CVE-2024-3400        # one CVE: scores, CWE, exploitation, references
+cyber cve --json               # machine-readable, for agents
+```
+
+An NVD API key is optional (`NVD_API_KEY` or `.secrets/nvd-api-key`); it only raises the rate limit.
 
 Without the interface: `cyber "task"`, `cyber research "task"`, `cyber -c "continue"`, or pipe input with `cat notes.txt | cyber "summarize this"`. `cyber help` lists commands, `cyber sessions` lists sessions and `cyber logs [N | -f]` lists, opens or follows run logs. `cyber --version` prints the CLI version without starting a guest.
 

@@ -14,7 +14,7 @@ ui_pick() {
   local title="$1"; shift
   if command -v fzf >/dev/null; then
     fzf --height=60% --min-height=8 --reverse --border=rounded --border-label=" $title " --prompt='❯ ' --pointer='▶' \
-        --info=inline-right --no-multi --ansi --color='border:28,label:46:bold,prompt:40,pointer:46,hl:46,hl+:46:bold,fg+:46,bg+:-1,info:28,spinner:40,header:34' "$@"
+        --info=inline-right --no-multi --ansi --color="$FZF_COLORS" "$@"
   else
     local lines=() l i=1 n
     while IFS= read -r l; do lines+=("$l"); printf '%s%3d%s  %s\n' "$C_C" "$i" "$C_0" "$l" >&2; i=$((i + 1)); done
@@ -47,7 +47,7 @@ ui_header() {
   banner "${C_D}v$(cat "$HERE/VERSION")${C_0}" "${C_T}isolated workspace for AI security agents${C_0}"
   say "  ${C_M}│${C_0}"
   say "  ${C_M}│${C_0} ${C_D}sandbox${C_0}  $(ui_vm_line)"
-  say "  ${C_M}│${C_0} ${C_D}model  ${C_0}  ${C_M}${C_B}$(ui_short "$CUR_MODEL")${C_0} ${C_D}$CUR_MODEL${C_0} · $badge"
+  say "  ${C_M}│${C_0} ${C_D}model  ${C_0}  ${C_T}${C_B}$(ui_short "$CUR_MODEL")${C_0} ${C_D}$CUR_MODEL${C_0} · $badge"
   say "  ${C_M}│${C_0} ${C_D}quota  ${C_0}  $(quota_data --model "$CUR_MODEL")"
   say "  ${C_M}│${C_0} ${C_D}session${C_0}  ${C_T}${CUR_TITLE:-new}${C_0}${CUR_SESS:+ ${C_D}$CUR_SESS${C_0}}"
   say "  ${C_M}╰${C_0} ${C_D}type a task · ${C_0}${C_C}/${C_0}${C_D} commands · ${C_0}${C_C}/s${C_0}${C_D} sessions · ${C_0}${C_C}/model${C_0}${C_D} · Ctrl-D quit${C_0}"
@@ -77,6 +77,8 @@ UI_CMDS="/model     pick a model (becomes the default)
 /clean     disk usage; pick what to delete
 /pull      copy results from the VM now (/pull all = everything)
 /out       open the output folder (or print its path on a headless host)
+/cve       recent CVEs (/cve nginx, /cve CVE-ID, /cve --kev)
+/theme     colour theme (root, matrix, mono)
 /log       show the latest log (/log N opens the Nth, see /logs)
 /logs      recent run logs
 /key       save a provider API key
@@ -100,6 +102,17 @@ ui_read() {
   IFS= read -r -e -p "$1" UI_LINE && return 0
   echo; (( UI_INT )) && return 130
   return 1
+}
+
+ui_theme() {
+  local t="${1:-}" sel
+  if [[ -z "$t" ]]; then
+    sel="$(for t in $THEMES; do printf '%s %-7s %s\n' "$([[ $t == "$THEME" ]] && echo "●" || echo " ")" "$t" "$(theme_info "$t")"; done \
+      | ui_pick "theme")" || return 0
+    t="$(awk '{print ($1=="●") ? $2 : $1}' <<<"$sel")"
+  fi
+  [[ -n "$t" ]] || return 0
+  theme_command "$t" && { printf '\033[2J\033[H'; ui_header; }
 }
 
 ui_models_table() {
@@ -300,7 +313,7 @@ ui_clean() {
       where = ($1=="vm") ? "VM   work/" $2 : ($1=="mac") ? "Host out/work/" $2 : "Host " $2
       printf "%s\t%s\t%-52.52s %7d MB\n", $1, $2, where, $3 }' \
     | fzf --multi --height=60% --min-height=8 --reverse --border=rounded --border-label=" delete what? Tab = select, Enter = confirm, Esc = cancel " \
-          --prompt='❯ ' --pointer='▶' --marker='✗' --delimiter=$'\t' --with-nth=3 --color='border:28,label:46:bold,prompt:40,pointer:46,hl:46,hl+:46:bold,fg+:46,bg+:-1,info:28,spinner:40,header:34,marker:red')" || return 0
+          --prompt='❯ ' --pointer='▶' --marker='✗' --delimiter=$'\t' --with-nth=3 --color="$FZF_COLORS,marker:red")" || return 0
   [[ -n "$sel" ]] || return 0
   say "${C_Y}Will delete:${C_0}"; cut -f3 <<<"$sel" | sed 's/^/  /' >&2
   read -r -p "Delete these permanently? [y/N] " a; [[ "$a" == y ]] || { say "cancelled"; return 0; }
@@ -368,6 +381,8 @@ ui_cmd() {
     /out)          mkdir -p "$OUT"; open_output "$OUT" ;;
     /log)          logs_command "${rest:-1}" ;;
     /logs)         logs_command ;;
+    /cve)          cve_command $rest ;;
+    /theme)        ui_theme $rest ;;
     /key)          if [[ -n "$rest" ]]; then "$HERE/ailab" key $rest; else say "usage: /key <provider>"; fi ;;
     /config)       "$HERE/ailab" config ;;
     /down)         "$HERE/ailab" down ;;
@@ -391,7 +406,7 @@ ui_main() {
   local line p rc
   while :; do
     trap 'UI_INT=1' INT
-    p=$'\001'"$C_M$C_B"$'\002'"cyber"$'\001'"$C_0$C_D"$'\002'" $(ui_short "$CUR_MODEL")${CUR_TITLE:+ · $(cut -c1-24 <<<"$CUR_TITLE")}"$'\001'"$C_0$C_C"$'\002'" ❯ "$'\001'"$C_0"$'\002'
+    p=$'\001'"$C_L1"$'\002'"cyber"$'\001'"$C_0$C_D"$'\002'" $(ui_short "$CUR_MODEL")${CUR_TITLE:+ · $(cut -c1-24 <<<"$CUR_TITLE")}"$'\001'"$C_0$C_C"$'\002'" ❯ "$'\001'"$C_0"$'\002'
     ui_read "$p"; rc=$?
     (( rc == 130 )) && continue
     (( rc )) && break

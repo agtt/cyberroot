@@ -3,8 +3,11 @@
 ## Unreleased
 
 - Project renamed from CyberHutch to CyberRoot (repository `agtt/cyberroot`, Kali image `cyberroot-kali:1`). The `ailab` script, `cyber` alias, VM instance name and `AILAB_*` variables are unchanged so existing VMs keep working.
-- Green phosphor terminal theme; grouped `cyber help` with a CyberRoot banner (also in the interface header).
+- Grouped `cyber help` with a CyberRoot banner (also in the interface header).
 - `cyber sessions` lists sessions; `cyber logs [N | -f]` lists, opens or follows run logs (`/logs`, `/log N` in the interface).
+- `cyber cve` / `/cve`: recent NVD CVEs with CISA KEV marks, keyword/severity filters, CVE details and JSON output.
+- Themes (`cyber theme`, `/theme`): `root` (default), `matrix`, `mono`; the logo stays green.
+- Prompt: Ctrl-C clears the line and twice on an empty line exits; Ctrl-Z suspends.
 - Interface prompt suggests matching `/` commands while typing; Tab completes, arrows pick.
 
 ## 0.1.0 — 2026-11-10 (preview)

@@ -8,8 +8,10 @@ Without a list: Up/Down browse history, usual readline-style editing keys work.
 Usage: lineedit.py PROMPT [HISTORY_FILE]
   CYBER_CMDS         "/name  description" lines (the /help text)
   CYBER_CMD_ALIASES  "/s=/sessions ..." short names submitted as typed; their command is listed first
-Prints the entered line on stdout. Exit: 0 line, 3 EOF (Ctrl-D on empty line),
-130 Ctrl-C; anything else means "use the plain readline prompt instead".
+Ctrl-C clears the line; on an empty line it asks once more, then exits. Ctrl-D on an empty
+line exits. Ctrl-Z suspends (fg resumes).
+Prints the entered line on stdout. Exit: 0 line, 3 quit; anything else means
+"use the plain readline prompt instead".
 """
 import codecs
 import os
@@ -18,18 +20,19 @@ import select
 import signal
 import sys
 import termios
+import time
 import tty
 import unicodedata
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|[\x01\x02]")
 MAX_ITEMS = 8
-# Green phosphor theme, matching the shell interface: selected, command, description.
+# Theme colours from ailab (CYBER_C_*): selected item, other commands, descriptions, typed text.
 if os.environ.get("NO_COLOR"):
-    C_SEL = C_CMD = C_DIM = C_0 = ""
-elif "256color" in os.environ.get("TERM", "") or os.environ.get("COLORTERM"):
-    C_SEL, C_CMD, C_DIM, C_0 = "\x1b[1;38;5;46m", "\x1b[38;5;40m", "\x1b[38;5;28m", "\x1b[0m"
+    C_SEL = C_CMD = C_DIM = C_TXT = C_0 = ""
 else:
-    C_SEL, C_CMD, C_DIM, C_0 = "\x1b[1;92m", "\x1b[32m", "\x1b[2;32m", "\x1b[0m"
+    env = os.environ.get
+    C_SEL, C_CMD, C_DIM, C_TXT, C_0 = (env("CYBER_C_SEL", "\x1b[1;36m"), env("CYBER_C_CMD", ""),
+                                       env("CYBER_C_DIM", "\x1b[2m"), env("CYBER_C_TXT", ""), "\x1b[0m")
 
 
 def width(s):
@@ -90,8 +93,9 @@ def load_history(path):
 
 
 class Editor:
-    def __init__(self, fd, prompt, commands, aliases, history):
-        self.fd, self.commands, self.aliases, self.hist = fd, commands, aliases, history
+    def __init__(self, fd, prompt, commands, aliases, history, saved=None):
+        self.fd, self.commands, self.aliases, self.hist, self.saved = fd, commands, aliases, history, saved
+        self.notice, self.ctrl_c = "", 0.0
         self.known = {n for n, _ in commands} | set(aliases) | {f"/{i}" for i in range(1, 10)}
         self.prompt = prompt.replace("\x01", "").replace("\x02", "")
         self.pw = width(self.prompt)
@@ -121,7 +125,7 @@ class Editor:
             cols = max(20, os.get_terminal_size(self.fd).columns)
         except OSError:
             cols = 80
-        out = [f"\x1b[{self.row}A" if self.row else "", "\r\x1b[J", self.prompt, C_CMD + self.text + C_0]
+        out = [f"\x1b[{self.row}A" if self.row else "", "\r\x1b[J", self.prompt, C_TXT + self.text + C_0]
         total = self.pw + width(self.text)
         if total and total % cols == 0:
             out.append(" \r")  # leave the pending-wrap state so rows stay predictable
@@ -140,10 +144,24 @@ class Editor:
             if len(items) > MAX_ITEMS:
                 out.append(f"\r\n{C_DIM}  {self.sel + 1}/{len(items)} · ↑↓ pick · Tab complete · Esc hide{C_0}")
                 cur += 1
+        if menu and not items and self.notice:
+            out.append(f"\r\n{C_DIM}  {self.notice}{C_0}")
+            cur += 1
         trow, tcol = divmod(self.pw + width("".join(self.buf[:self.pos])), cols)
         out.append((f"\x1b[{cur - trow}A" if cur > trow else "") + "\r" + (f"\x1b[{tcol}C" if tcol else ""))
         self.row = trow
         self.write("".join(out))
+
+    def suspend(self):
+        """Ctrl-Z: give the terminal back, stop the whole job like a shell would, redraw after fg."""
+        self.render(menu=False)
+        self.write("\r\n\x1b[?2004l")
+        if self.saved:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.saved)
+        os.killpg(os.getpgrp(), signal.SIGTSTP)
+        tty.setraw(self.fd)
+        self.write("\x1b[?2004h")
+        self.row = 0
 
     def finish(self, suffix=""):
         self.pos = len(self.buf)
@@ -206,6 +224,8 @@ class Editor:
         self.render()
         for k in self.keys():
             items = self.items()
+            if k != "\x03":
+                self.notice = ""
             if self.paste and k in ("\r", "\n", "\t"):
                 k = " "
             if k == "\x1b[200~":
@@ -220,8 +240,15 @@ class Editor:
                 self.finish()
                 return 0, text
             elif k == "\x03":
-                self.finish("^C")
-                return 130, ""
+                if self.buf:
+                    self.set_text("")
+                elif time.monotonic() - self.ctrl_c < 2:
+                    self.finish()
+                    return 3, ""
+                else:
+                    self.ctrl_c, self.notice = time.monotonic(), "press Ctrl-C again to exit"
+            elif k == "\x1a":
+                self.suspend()
             elif k == "\x04" and not self.buf:
                 self.finish()
                 return 3, ""
@@ -299,7 +326,7 @@ def main():
     try:
         tty.setraw(fd)
         os.write(fd, b"\x1b[?2004h")
-        code, line = Editor(fd, prompt, commands, aliases, history).run()
+        code, line = Editor(fd, prompt, commands, aliases, history, old).run()
     finally:
         os.write(fd, b"\x1b[?2004l")
         termios.tcsetattr(fd, termios.TCSADRAIN, old)

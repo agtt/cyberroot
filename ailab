@@ -6,6 +6,8 @@
 #   cyber resume                 interface, opening with the session picker
 #   cyber sessions               list sessions (cyber resume opens one)
 #   cyber logs [N | -f]          recent run logs / open the Nth / follow the newest
+#   cyber cve [keyword | CVE-ID] [--kev] [--severity high] [--days N] [--json]   recent CVEs (NVD + CISA KEV)
+#   cyber theme [root|matrix|mono]   colour theme
 #   cyber "task"                 run with the default model (live output + log)
 #   cyber <shortcut> "task"      run with that model (models.txt)
 #   cyber <provider/model> "task"    run with a model that has no shortcut
@@ -42,7 +44,7 @@ CONFIG="$HERE/opencode.jsonc"
 DEFAULT="$HERE/default"
 # Inspection commands use templates without creating user configuration.
 case "${1:-}:${2:-}" in
-  doctor:*|help:*|-h:*|--help:*|logs:*|version:*|-v:*|--version:*|tools:plan|tools:status|tools:list|tools:)
+  doctor:*|help:*|-h:*|--help:*|logs:*|theme:*|cve:*|version:*|-v:*|--version:*|tools:plan|tools:status|tools:list|tools:)
     [[ -f "$MODELS" ]] || MODELS="$HERE/models.example.txt"
     [[ -f "$CONFIG" ]] || CONFIG="$HERE/opencode.example.jsonc"
     ;;
@@ -192,27 +194,75 @@ oc_run() { if [[ -t 0 ]]; then oc run --standalone "$@" </dev/null; else oc run 
 
 stop_remote() { lsh sudo pkill -TERM -f "AILAB_RUN=[r]${RUN_ID#r}" 2>/dev/null || true; }
 
-# --- terminal look: green phosphor theme (colour only when stderr is a terminal and NO_COLOR is unset) ---
-# C_M bright green (logo, frames), C_C green (commands, prompt), C_T text green, C_D dark green (secondary text).
-if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
-  C_B=$'\e[1m'; C_R=$'\e[31m'; C_Y=$'\e[33m'; C_0=$'\e[0m'
-  if [[ "${TERM:-}" == *256color* || -n "${COLORTERM:-}" ]]; then
-    C_M=$'\e[38;5;46m'; C_C=$'\e[38;5;40m'; C_T=$'\e[38;5;34m'; C_G=$'\e[38;5;46m'; C_D=$'\e[38;5;28m'
-  else C_M=$'\e[92m'; C_C=$'\e[32m'; C_T=$'\e[32m'; C_G=$'\e[92m'; C_D=$'\e[2;32m'; fi
-else C_B=; C_D=; C_R=; C_G=; C_Y=; C_M=; C_C=; C_T=; C_0=; fi
+# --- terminal look (colour only when stderr is a terminal and NO_COLOR is unset) ---
+# The CyberRoot logo is always green (C_L1/C_L2); the theme sets the rest: C_M frames, C_C commands,
+# C_T body text, C_D secondary text. Saved in ./theme; cyber theme / /theme switches it.
+THEMES="root matrix mono"
+theme_info() {
+  case "$1" in
+    root)   echo "green logo, standard terminal colours (default)" ;;
+    matrix) echo "everything in green phosphor" ;;
+    mono)   echo "green logo, plain text" ;;
+  esac
+}
+theme_name() {
+  local t; t="$(cat "$HERE/theme" 2>/dev/null || true)"
+  if [[ " $THEMES " == *" $t "* ]]; then echo "$t"; else echo root; fi
+}
+set_theme() {
+  local t="${1:-$(theme_name)}" x256=""
+  [[ "${TERM:-}" == *256color* || -n "${COLORTERM:-}" ]] && x256=1
+  C_B=; C_D=; C_R=; C_G=; C_Y=; C_M=; C_C=; C_T=; C_0=; C_L1=; C_L2=; FZF_COLORS=bw
+  local sel="" cmd="" txt=""
+  if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+    C_B=$'\e[1m'; C_R=$'\e[31m'; C_Y=$'\e[33m'; C_G=$'\e[32m'; C_D=$'\e[2m'; C_0=$'\e[0m'
+    if [[ -n $x256 ]]; then C_L1=$'\e[1;38;5;46m'; C_L2=$'\e[38;5;40m'; else C_L1=$'\e[1;92m'; C_L2=$'\e[32m'; fi
+    case "$t" in
+      matrix)
+        if [[ -n $x256 ]]; then C_M=$'\e[38;5;46m'; C_C=$'\e[38;5;40m'; C_T=$'\e[38;5;34m'; C_G=$'\e[38;5;46m'; C_D=$'\e[38;5;28m'
+        else C_M=$'\e[92m'; C_C=$'\e[32m'; C_T=$'\e[32m'; C_G=$'\e[92m'; C_D=$'\e[2;32m'; fi
+        FZF_COLORS='border:28,label:46:bold,prompt:40,pointer:46,hl:46,hl+:46:bold,fg+:46,bg+:-1,info:28,spinner:40,header:34'
+        sel="$C_B$C_M"; cmd="$C_C"; txt="$C_C" ;;
+      mono)
+        C_M="$C_D"; C_C="$C_B"; FZF_COLORS=bw; sel="$C_B" ;;
+      *)
+        C_M=$'\e[35m'; C_C=$'\e[36m'
+        FZF_COLORS='border:magenta,label:magenta:bold,prompt:cyan,pointer:cyan,hl:yellow,hl+:yellow'
+        sel="$C_B$C_C" ;;
+    esac
+  fi
+  THEME="$t"
+  # Colours for the Python helpers (prompt editor, CVE list).
+  export CYBER_C_SEL="$sel" CYBER_C_CMD="$cmd" CYBER_C_TXT="$txt" CYBER_C_DIM="$C_D" CYBER_C_ID="$C_C" CYBER_C_TEXT="$C_T"
+}
+set_theme
+
+# cyber theme [name]: list themes or switch (saved for the next start).
+theme_command() {
+  local t
+  if [[ -z "${1:-}" ]]; then
+    for t in $THEMES; do
+      printf '  %s %s%-7s%s %s%s%s\n' "$([[ $t == "$THEME" ]] && echo "●" || echo " ")" "$C_C" "$t" "$C_0" "$C_D" "$(theme_info "$t")" "$C_0" >&2
+    done
+    say "${C_D}cyber theme <name> switches${C_0}"; return 0
+  fi
+  [[ " $THEMES " == *" $1 "* ]] || { say "unknown theme: $1 (themes: $THEMES)"; return 2; }
+  echo "$1" > "$HERE/theme"; set_theme "$1"
+  say "${C_G}✔${C_0} theme: $1 ${C_D}· $(theme_info "$1")${C_0}"
+}
 say()  { printf '%s\n' "$*" >&2; }
 
-# Logo (Calvin S): CYBER bright green, ROOT green. $1 = text beside the 2nd line, $2 = beside the 3rd.
+# Logo (Calvin S), green in every theme. $1 = text beside the 2nd line, $2 = beside the 3rd.
 banner() {
   local a=("╔═╗╦ ╦╔╗ ╔═╗╦═╗" "║  ╚╦╝╠╩╗║╣ ╠╦╝" "╚═╝ ╩ ╚═╝╚═╝╩╚═") b=("╦═╗╔═╗╔═╗╔╦╗" "╠╦╝║ ║║ ║ ║ " "╩╚═╚═╝╚═╝ ╩ ")
-  say "  $C_M$C_B${a[0]}$C_C${b[0]}$C_0"
-  say "  $C_M$C_B${a[1]}$C_C${b[1]}$C_0  ${1:-}"
-  say "  $C_M$C_B${a[2]}$C_C${b[2]}$C_0  ${2:-}"
+  say "  $C_L1${a[0]}$C_0$C_L2${b[0]}$C_0"
+  say "  $C_L1${a[1]}$C_0$C_L2${b[1]}$C_0  ${1:-}"
+  say "  $C_L1${a[2]}$C_0$C_L2${b[2]}$C_0  ${2:-}"
 }
 
 usage() {
-  local C_B=$C_B C_D=$C_D C_M=$C_M C_C=$C_C C_T=$C_T C_0=$C_0
-  [[ -t 1 ]] || { C_B=; C_D=; C_M=; C_C=; C_T=; C_0=; }
+  local C_B=$C_B C_D=$C_D C_M=$C_M C_C=$C_C C_T=$C_T C_0=$C_0 C_L1=$C_L1 C_L2=$C_L2
+  [[ -t 1 ]] || { C_B=; C_D=; C_M=; C_C=; C_T=; C_0=; C_L1=; C_L2=; }
   row() { printf '  %s%-40s%s %s%s%s\n' "$C_C" "$1" "$C_0" "$C_T" "$2" "$C_0" >&2; }
   sec() { printf '\n%s%s-- %s --%s %s%s%s\n' "$C_M" "$C_B" "$1" "$C_0" "$C_D" "${2:-}" "$C_0" >&2; }
   say; banner "${C_D}v$(cat "$HERE/VERSION")${C_0}" "${C_T}isolated workspace for AI security agents${C_0}"
@@ -237,6 +287,11 @@ usage() {
   row 'cyber sessions | resume' 'list sessions / open the picker'
   row 'cyber logs [N | -f]' 'recent logs / open the Nth / follow the newest'
   row 'cyber pull [all] | out | clean' 'copy results, open output, free disk'
+  sec "INTEL"
+  row 'cyber cve [keyword ...]' 'CVEs published in the last 3 days (NVD, KEV marked)'
+  row 'cyber cve CVE-2024-3400' 'one CVE: scores, CWE, exploitation, references'
+  row 'cyber cve --kev | --severity high' 'known exploited only / minimum severity'
+  row 'cyber theme [root|matrix|mono]' 'colour theme; the logo stays green'
   sec "TOOLS" "optional, never installed automatically"
   row 'cyber tools [status | install ...]' 'engine, kali, strix, shannon'
   row 'cyber kali [--network] -- <cmd>' 'run a Kali CLI (offline by default)'
@@ -245,6 +300,13 @@ usage() {
   say
   say "${C_D}claude/<model> shortcuts run Claude Code on the host, outside the sandbox.${C_0}"
   say "${C_D}AILAB_ROUNDS auto-continue limit (12) · AILAB_THINKING=0 hides thinking · NO_COLOR disables colour${C_0}"
+}
+
+# cyber cve: recent CVEs from NVD with CISA KEV marks (public feeds; cached under out/.cve).
+cve_command() {
+  local key=""
+  [[ -r "$SECRETS/nvd-api-key" ]] && key="$(cat "$SECRETS/nvd-api-key")"
+  NVD_API_KEY="${NVD_API_KEY:-$key}" python3 -I -B "$HERE/cve.py" --cache "$OUT/.cve" "$@"
 }
 
 # cyber logs: list the newest runs, open the Nth (1 = newest) or follow the newest.
@@ -451,6 +513,8 @@ case "${1:-}" in
     [[ "$(state)" == Running ]] || say "${C_D}cached list; the sandbox is not running${C_0}"
     say "${C_D}cyber resume opens one · /1-/9 in the interface jumps to the newest${C_0}" ;;
   logs)   logs_command "${2:-}" ;;
+  theme)  theme_command "${2:-}" ;;
+  cve)    shift; cve_command "$@" ;;
   out)    mkdir -p "$OUT"; open_output "$OUT" ;;
   list)   source "$HERE/ui.sh"; CUR_MODEL="$(default_model)"; quota_auto_refresh; ui_models_table ;;
   quota)  source "$HERE/ui.sh"; ui_quota "${2:-}" ;;
