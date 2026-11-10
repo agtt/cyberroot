@@ -61,6 +61,10 @@ UI_CMDS="/model     pick a model (becomes the default)
 /rm        remove a model shortcut
 /models    list shortcuts
 /quota     fetch balances once (/quota on|off = automatic checks)
+/tools     optional tools: status / install engine|kali|strix|shannon
+/kali      run an installed Kali CLI (--network explicitly enables internet)
+/strix     run optional Strix with the selected model
+/shannon   run optional Shannon with the selected model
 /fallback  fallback order (used on limit/error)
 /rounds    auto-continue round limit (0 = unlimited)
 /claude    open Claude Code on the host (outside the sandbox)
@@ -300,6 +304,18 @@ ui_task() {
   ( ui_sessions_refresh >/dev/null 2>&1 & )   # keep /1-/9 and the picker current without making the prompt wait
 }
 
+ui_optional_tool() {
+  local tool="$1" text="$2" argument
+  local arguments=()
+  # Parse quotes without shell eval; target URLs/paths remain individual arguments.
+  local encoded
+  encoded="$(python3 -c 'import shlex,sys,json; print(json.dumps(shlex.split(sys.argv[1])))' "$text")" || return 0
+  while IFS= read -r -d '' argument; do arguments+=("$argument"); done < <(
+    python3 -c 'import json,sys; [sys.stdout.buffer.write(s.encode()+b"\0") for s in json.loads(sys.argv[1])]' "$encoded")
+  if [[ "$tool" == tools ]]; then tools_command "${arguments[@]+"${arguments[@]}"}" || true
+  else CYBER_TOOL_MODEL="$CUR_MODEL" tool_run "$tool" "${arguments[@]+"${arguments[@]}"}" || true; fi
+}
+
 ui_cmd() {
   local line="$1" c rest
   c="${line%% *}"; rest=""; [[ "$line" == *" "* ]] && rest="${line#* }"
@@ -318,6 +334,7 @@ ui_cmd() {
     /rm)           ui_rm $rest ;;
     /models|/list) ui_models_table >&2 ;;
     /quota)        ui_quota "$rest" ;;
+    /tools|/kali|/strix|/shannon) ui_optional_tool "${c#/}" "$rest" ;;
     /fallback)     if [[ -n "$rest" ]]; then echo "$rest" > "$HERE/fallback"; fi; say "fallback order: $(fallbacks | tr '\n' ' ')" ;;
     /rounds)       [[ "$rest" =~ ^[0-9]+$ ]] && export AILAB_ROUNDS="$rest"; say "round limit: ${AILAB_ROUNDS:-12}" ;;
     /claude)       run_host "claude/" $rest ;;

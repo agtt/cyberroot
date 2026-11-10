@@ -62,6 +62,9 @@ messages keep their context. Everything else is a slash command (type `/` for a 
 | `/rounds N` | auto-continue limit (0 = unlimited) |
 | `/quota` | check supported providers' balances once |
 | `/quota on`, `/quota off` | enable/disable automatic quota checks (default off) |
+| `/tools` | optional Kali, Strix, Shannon and guest rootless engine availability |
+| `/tools install <name>` | explicitly install one optional tool |
+| `/kali`, `/strix`, `/shannon` | run an installed tool; the AI tools use the selected API model |
 | `/claude` | open Claude Code on the host (outside the sandbox) |
 | `/tui`, `/sh` | opencode's own TUI / a shell, inside the VM |
 | `/status`, `/clean` | VM, firewall, memory, disk / pick what to delete |
@@ -126,6 +129,38 @@ Know the limits:
 - Logs go to `out/logs/`; anything older than a day is gzipped.
 - `cyber clean` shows what uses space (VM projects, host copies, old logs) and deletes only what you select and confirm. Space freed in the VM is returned to the host (trim).
 
+## Optional security tools
+
+**All integrations are opt-in.** Normal startup, model selection and `cyber up` do not download Kali, Strix, Shannon, Bun, Node or Docker. Small launcher helpers are copied during configuration sync. Install only the components you want, inside the selected VM/SSH target:
+
+```bash
+cyber tools                         # availability; does not wake a stopped target
+cyber tools install engine          # optional guest rootless Docker, shared by these tools
+cyber tools install kali            # optional compact Kali image and selected CLI utilities
+cyber tools install strix           # optional pinned Strix CLI
+cyber tools install shannon         # optional pinned Shannon CLI, Bun and Node prerequisites
+```
+
+Each install asks first (`--yes` is available for explicitly approved automation). Installers never mount the computer's Docker socket or grant the agent access to a rootful engine. Docker runs rootless inside the guest; existing host Docker settings are ignored. Downloads, images and package caches can occupy hundreds of MB or more. Strix/Shannon download their own worker images when first used, after you explicitly choose the optional tool. No upstream pentest or paid model request is run during installation.
+
+Use an installed integration from the terminal or the matching slash command:
+
+```bash
+cyber kali -- nmap -sT -h                         # offline by default
+cyber kali --network -- curl https://example.com # only for an authorized network task
+cyber strix --help
+cyber strix --model my-model -- --target https://your-authorized-app.example
+cyber shannon --model my-model -- start -u https://your-authorized-app.example -r ./project
+```
+
+All paths are inside the guest. Kali maps the guest's `~/work` to `/work`, with a read-only root, dropped capabilities, no network by default and a 2 GiB memory limit. Enable network explicitly with `--network`; use TCP-connect scans (`nmap -sT`) rather than raw-socket scans. Strix/Shannon manage their own worker containers; the outer VM remains the host isolation boundary. Their engines, network activity, resource requirements, exit codes and findings follow the upstream tools, not CyberHutch's OpenCode auto-continue/fallback loop.
+
+The selected **configured OpenAI-compatible API provider** supplies the endpoint, upstream model ID and key. The API key is passed through the child environment, never argv or generated model files. Shannon gets a temporary Chat Completions model definition and follows the scan until completion. Credentials are read inside the guest; run `cyber sync` after changing configuration. OpenCode's free models and host Claude sessions do not provide reusable API credentials, so select your own configured API model for these tools. Model capability/tool-calling support and provider account access still depend on the model you choose. For native tool configuration, use `cyber sh` and the installed executable under `~/.local/share/cyber-tools/`.
+
+Agents inside the guest can use `~/.local/bin/cyber-tool status` and `~/.local/bin/cyber-tool run strix --model provider/model -- --target <authorized-target>` (or `run shannon ...`). Agents are instructed not to install these tools unless the user explicitly chooses them. `cyber down` stops the local VM and its tool services; installed optional packages remain available for later use.
+
+Upstream projects are downloaded separately under their own licenses, not bundled into this MIT repository: [Strix](https://github.com/usestrix/strix) (Apache-2.0), [Shannon](https://github.com/KeygraphHQ/shannon) (AGPL-3.0), [Kali images](https://www.kali.org/docs/containers/official-kalilinux-docker-images/). Installation follows [rootless Docker](https://docs.docker.com/engine/security/rootless/); model routing follows [Strix configuration](https://github.com/usestrix/strix/blob/main/docs/advanced/configuration.mdx) and [Shannon providers](https://keygraph.io/docs/how-to/ai-providers/).
+
 ## VPS target
 
 The SSH target is also the practical option for WSL2 hosts without working nested virtualization. Run Cyber inside your WSL2 distro, keep the checkout in its Linux filesystem, then use the commands below. The WSL2 distro itself is not treated as the agent sandbox; the agent still runs in the separate Lima VM or SSH target. `/out` uses `wslview` when installed, otherwise prints the folder path on a headless shell. No desktop-opening utility is required for tasks.
@@ -162,11 +197,13 @@ SSH access is unaffected.
 ## Offline checks
 
 ```bash
-bash -n ailab ui.sh platform.sh vm-setup.sh vps-setup.sh
-python3 -B -m unittest test_cli test_quota
+bash -n ailab ui.sh platform.sh tools.sh tool-deps.sh vm-setup.sh vps-setup.sh
+python3 -B -m unittest test_cli test_quota test_tools
 ```
 
 The regression checks use mocked commands and temporary files inside the repository; they do not start a VM or call model APIs. Runs still use `--standalone` to avoid the known background-service hang.
+
+Optional integration validation: 19 focused checks passed inside a Linux guest. The actual Linux arm64 Strix 1.7.0 and Shannon 3.5.0 installers and `version`/`help` entry points were exercised without credentials or model calls. A temporary Kali image was checked with network disabled, capabilities dropped and a read-only root. Temporary binaries, Node/Bun/package caches and the test image were removed afterwards. A complete rootless-engine installation, the custom Kali image build, upstream worker startup and paid-model pentest runs have not been exercised end to end; they still depend on upstream runtime requirements and the selected provider/model.
 
 ## License
 

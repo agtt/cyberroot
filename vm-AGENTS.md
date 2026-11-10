@@ -2,7 +2,7 @@
 
 - Reply in the language of the user's latest message, regardless of the language of these rules or the files. Keep code, commands, file names and `CYBER_DONE` unchanged.
 
-- Keep every file (downloads, tools, decompiled output, notes, report) under `/home/agent/work/<project>/`.
+- Keep project files (downloads, decompiled output, notes, reports) under `/home/agent/work/<project>/`. Optional integrations are managed separately under `~/.local/share/cyber-tools/` only after an explicit installation choice.
   Never write to `/tmp` or elsewhere: `/tmp` is RAM-backed and the user only sees `~/work` on their own machine.
 - Write findings to `~/work/<project>/REPORT.md`, at the top level of the project; each finding needs a file path and line as evidence.
   Only files up to 3 levels deep and under 10 MB are copied to the user's machine, so keep reports and key evidence shallow and small.
@@ -18,6 +18,10 @@
 - When a project is finished, delete large intermediate output you no longer need (decompiled trees, extracted archives) to keep the disk small.
 
 ## Keep working
+
+- Optional integrations: `~/.local/bin/cyber-tool status` reports availability. Kali, Strix, Shannon and the guest rootless Docker engine are not installed by default. Never install them merely because these rules mention them; install only after the user chooses them through `cyber tools install <name>`.
+- Installed tools can be invoked with `~/.local/bin/cyber-tool run strix --model provider/model -- --target <authorized-target>` or `run shannon --model provider/model -- start -u <authorized-url> -r <guest-repository>`. They reuse that provider's configured API key without writing it into reports. OpenCode free models and host Claude sessions cannot supply transferable credentials.
+- `~/.local/bin/cyber-tool run kali -- <command>` is network-off by default. Add `--network` before the command separator only when the user explicitly authorizes network testing. Work files live at `/work` in Kali, mapped from this VM's `~/work`, never from the physical host.
 
 - Do not ask the user questions, wait for approval, or end with "I can do X if you want". If there are several ways forward, pick the most sensible one and continue.
 - If a tool fails (web search, download, memory), try another route; do not get stuck on the same error.

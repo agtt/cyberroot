@@ -32,6 +32,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$HERE/platform.sh"
+source "$HERE/tools.sh"
 VM=ai-lab
 OUT="$HERE/out"
 MODELS="$HERE/models.txt"
@@ -84,6 +85,7 @@ sync_cfg() {
     [[ -f "$f" ]] || continue
     lsh sudo -u agent sh -c "umask 077; cat > /home/agent/.secrets/$(basename "$f")" < "$f"
   done
+  sync_tool_helpers
 }
 
 up_vps() {
@@ -352,6 +354,8 @@ case "${1:-}" in
   out)    mkdir -p "$OUT"; open_output "$OUT" ;;
   list)   source "$HERE/ui.sh"; CUR_MODEL="$(default_model)"; quota_auto_refresh; ui_models_table ;;
   quota)  source "$HERE/ui.sh"; ui_quota "${2:-}" ;;
+  tools)  shift; tools_command "$@" ;;
+  kali|strix|shannon) tool="$1"; shift; tool_run "$tool" "$@" ;;
   use)
     if [[ -z "${2:-}" ]]; then default_model; exit 0; fi
     m="$(resolve "$2")"; [[ -n "$m" ]] || { echo "unknown shortcut/model: $2 (cyber list)" >&2; exit 2; }
@@ -378,7 +382,10 @@ case "${1:-}" in
     if [[ $# -eq 0 ]]; then fallbacks; exit 0; fi
     for k in "$@"; do [[ -n "$(resolve "$k")" ]] || { echo "unknown shortcut/model: $k" >&2; exit 2; }; done
     echo "$*" > "$HERE/fallback"; echo "fallback order: $*" ;;
-  -h|--help|help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help)
+    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    printf '\nOptional tools (never installed automatically):\n  cyber tools [status | install engine|kali|strix|shannon]\n  cyber kali [--network] -- <command>\n  cyber strix|shannon [--model shortcut] -- <tool arguments>\n'
+    ;;
   run)
     shift; ensure_up; set +e; oc_run "$@"; rc=$?; set -e; pull; exit "$rc" ;;
   "")
