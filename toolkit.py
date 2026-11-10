@@ -25,6 +25,21 @@ STRIX_HASHES = {
 KALI_IMAGE = "cyberhutch-kali:1"
 
 
+def install_plan(selected=None):
+    """Machine-readable, offline plan; never installs or starts a target."""
+    catalog = {
+        "engine": {"optional": True, "version": "upstream rootless Docker", "runtime_requires": []},
+        "kali": {"optional": True, "version": KALI_IMAGE, "runtime_requires": ["engine"]},
+        "strix": {"optional": True, "version": STRIX_VERSION, "runtime_requires": ["engine"]},
+        "shannon": {"optional": True, "version": SHANNON_VERSION, "runtime_requires": ["engine"]},
+    }
+    choices = [] if selected is None else [*catalog[selected]["runtime_requires"], selected]
+    return {"selected": selected, "automatic_install": False, "execution_location": "guest VM or SSH target",
+            "tools": catalog, "commands": [["./ailab", "tools", "install", name, "--yes"] for name in choices],
+            "api_model_required": selected in ("strix", "shannon"),
+            "note": "Execute install commands only after the user explicitly selects this integration. No target scans or paid model calls are part of installation."}
+
+
 def root():
     return Path(os.environ.get("CYBER_TOOLS_HOME", str(Path.home() / ".local/share/cyber-tools")))
 
@@ -212,15 +227,29 @@ def kali_command(args):
 
 
 def main():
-    if os.geteuid() == 0:
-        raise ValueError("Optional tools must run as the unprivileged guest agent, never root.")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("status", "install", "run"))
+    parser.add_argument("action", choices=("plan", "status", "install", "run"))
     parser.add_argument("tool", nargs="?", choices=TOOLS)
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--model", default="")
+    parser.add_argument("--json", action="store_true")
     options, args = parser.parse_known_args()
     args = args[1:] if args[:1] == ["--"] else args
+    if options.action == "plan":
+        if args:
+            parser.error("unexpected plan arguments")
+        plan = install_plan(options.tool)
+        if options.json:
+            print(json.dumps(plan))
+        else:
+            print(plan["note"])
+            for command in plan["commands"]:
+                print(" ".join(command))
+            if not options.tool:
+                print("Choose a tool: cyber tools plan engine|kali|strix|shannon [--json]")
+        return
+    if os.geteuid() == 0:
+        raise ValueError("Optional tools must run as the unprivileged guest agent, never root.")
     if options.action == "status":
         for name, path in (("engine", Path.home() / "bin/docker"), ("strix", root() / "strix/strix"),
                            ("shannon", root() / "shannon/node_modules/.bin/shannon")):

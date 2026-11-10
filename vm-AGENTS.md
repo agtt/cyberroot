@@ -19,7 +19,7 @@
 
 ## Keep working
 
-- Optional integrations: `~/.local/bin/cyber-tool status` reports availability. Kali, Strix, Shannon and the guest rootless Docker engine are not installed by default. Never install them merely because these rules mention them; install only after the user chooses them through `cyber tools install <name>`.
+- Optional integrations: `~/.local/bin/cyber-tool status` reports availability and `~/.local/bin/cyber-tool plan strix --json` describes the host-side install commands in dependency order. Kali, Strix, Shannon and the guest rootless Docker engine are not installed by default. Never install them merely because these rules mention them; install only after the user chooses them through `cyber tools install <name>`. If guest administrator prerequisites are missing, report that host-side plan; do not try to acquire sudo or connect to the computer's Docker socket.
 - Installed tools can be invoked with `~/.local/bin/cyber-tool run strix --model provider/model -- --target <authorized-target>` or `run shannon --model provider/model -- start -u <authorized-url> -r <guest-repository>`. They reuse that provider's configured API key without writing it into reports. OpenCode free models and host Claude sessions cannot supply transferable credentials.
 - `~/.local/bin/cyber-tool run kali -- <command>` is network-off by default. Add `--network` before the command separator only when the user explicitly authorizes network testing. Work files live at `/work` in Kali, mapped from this VM's `~/work`, never from the physical host.
 

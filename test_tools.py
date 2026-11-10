@@ -13,6 +13,17 @@ HERE = Path(__file__).resolve().parent
 
 
 class ToolTests(unittest.TestCase):
+    def test_agent_plan_selects_only_requested_tool_and_dependency(self):
+        self.assertEqual(toolkit.install_plan()["commands"], [])
+        plan = toolkit.install_plan("strix")
+        self.assertFalse(plan["automatic_install"])
+        self.assertEqual([command[-2] for command in plan["commands"]], ["engine", "strix"])
+        self.assertTrue(all(tool["optional"] for tool in plan["tools"].values()))
+        result = subprocess.run(["bash", "ailab", "tools", "plan", "strix", "--json"], cwd=HERE,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), plan)
+
     def fixture(self, directory):
         root = Path(directory)
         (root / "strix").mkdir()

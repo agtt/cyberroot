@@ -2,6 +2,8 @@
 
 Sandboxed AI agents for security research, operated through the `cyber` CLI.
 
+**Installing with a coding agent? Read [AGENT-INSTALL.md](AGENT-INSTALL.md).** It gives non-interactive commands, dependency order and a machine-readable install plan. Optional tools stay uninstalled until the user chooses them.
+
 **Early preview.** A personal workflow tool, open for feedback and contributions. The local macOS workflow has been exercised; Linux/WSL2 adapters currently have offline tests only. This project has not had an independent security audit. Review the security model and host-mode exceptions before using it with sensitive data.
 
 A small CLI that runs AI coding/security agents ([opencode](https://opencode.ai)) inside a locked-down
@@ -29,20 +31,20 @@ cyber glm-free ❯
 
 - macOS, Linux, or Windows through WSL2 (run the CLI in the WSL Linux shell). Apple Silicon uses Lima's `vz` driver; Intel macOS/Linux/WSL2 select `qemu` for new local VMs. Existing VMs are unchanged. Linux/WSL2 adapters have offline tests; a real Linux/WSL2 VM has not yet been validated.
 - On Linux/WSL2, install Bash, Perl, Python 3, curl, OpenSSH and the standard Unix tools. For local VMs also install Lima 2.0+ and QEMU. Fast local QEMU requires usable hardware acceleration (`/dev/kvm` on Linux); if WSL2 cannot expose it, use an SSH target instead of nesting a slow VM. See [Lima's QEMU requirements](https://lima-vm.io/docs/config/vmtype/qemu/).
-- [Lima](https://lima-vm.io) 2.0+ (`brew install lima`)
-- `fzf` for the pickers (`brew install fzf`; falls back to numbered lists without it)
+- For a local VM: [Lima](https://lima-vm.io) 2.0+ (`brew install lima` on macOS). An SSH target does not require local Lima.
+- Optional: `fzf` for the pickers (`brew install fzf` on macOS; falls back to numbered lists without it).
 - Optional: `opencode` on the host (only used to pin the same version in the VM; otherwise the latest is installed), `claude` (Claude Code) for host-side models
 
 ## Install
 
 ```bash
 git clone https://github.com/agtt/cyberhutch.git ~/cyber-cli
-echo 'alias cyber="$HOME/cyber-cli/ailab"' >> ~/.zshrc && source ~/.zshrc
-cyber up        # first run builds the VM (a few minutes)
-cyber           # open the interface
+cd ~/cyber-cli
+./ailab up       # base guest only; optional integrations remain uninstalled
+./ailab          # open the interface
 ```
 
-For Bash on Linux/WSL2, add the same alias to `~/.bashrc` and reload that file instead of `~/.zshrc`.
+For a convenient human-facing command, add `alias cyber="$HOME/cyber-cli/ailab"` to `~/.zshrc` (Zsh) or `~/.bashrc` (Bash on Linux/WSL2), then reload that shell file. The examples below use `cyber`; agents can always call `./ailab` directly from the checkout, without changing shell configuration.
 
 `cyber` works from any directory. On first use it creates your local `models.txt` and `opencode.jsonc`
 from the `*.example` files; both are git-ignored.
@@ -63,6 +65,7 @@ messages keep their context. Everything else is a slash command (type `/` for a 
 | `/quota` | check supported providers' balances once |
 | `/quota on`, `/quota off` | enable/disable automatic quota checks (default off) |
 | `/tools` | optional Kali, Strix, Shannon and guest rootless engine availability |
+| `/tools plan <name> --json` | inspect one tool's dependency/install commands without downloads |
 | `/tools install <name>` | explicitly install one optional tool |
 | `/kali`, `/strix`, `/shannon` | run an installed tool; the AI tools use the selected API model |
 | `/claude` | open Claude Code on the host (outside the sandbox) |
@@ -133,13 +136,23 @@ Know the limits:
 
 **All integrations are opt-in.** Normal startup, model selection and `cyber up` do not download Kali, Strix, Shannon, Bun, Node or Docker. Small launcher helpers are copied during configuration sync. Install only the components you want, inside the selected VM/SSH target:
 
+| Optional component | Purpose | Install only when chosen |
+|---|---|---|
+| `engine` | Guest rootless Docker, needed to run the other integrations | `cyber tools install engine` |
+| `kali` | Compact Kali image with selected CLI utilities | `cyber tools install kali` |
+| `strix` | Pinned Strix CLI | `cyber tools install strix` |
+| `shannon` | Pinned Shannon CLI and its Node/Bun prerequisites | `cyber tools install shannon` |
+
+Check availability with `cyber tools`; a stopped target stays stopped. To install **only Strix**, for example:
+
 ```bash
-cyber tools                         # availability; does not wake a stopped target
-cyber tools install engine          # optional guest rootless Docker, shared by these tools
-cyber tools install kali            # optional compact Kali image and selected CLI utilities
-cyber tools install strix           # optional pinned Strix CLI
-cyber tools install shannon         # optional pinned Shannon CLI, Bun and Node prerequisites
+cyber tools plan strix --json       # offline dependency/command plan; no installation
+cyber tools install engine          # shared runtime, chosen as a Strix dependency
+cyber tools install strix           # does not install Kali or Shannon
+cyber strix --version               # no API key or running Docker needed
 ```
+
+For agents, use `./ailab tools plan <chosen-tool> --json` and execute its `commands` arrays only after the user authorizes that integration. `./ailab tools plan --json` lists the optional catalog with **no install commands**. The [agent installation guide](AGENT-INSTALL.md) explains base setup, guest administrator prerequisites, API model selection and cleanup.
 
 Each install asks first (`--yes` is available for explicitly approved automation). Installers never mount the computer's Docker socket or grant the agent access to a rootful engine. Docker runs rootless inside the guest; existing host Docker settings are ignored. Downloads, images and package caches can occupy hundreds of MB or more. Strix/Shannon download their own worker images when first used, after you explicitly choose the optional tool. No upstream pentest or paid model request is run during installation.
 
@@ -184,6 +197,8 @@ SSH access is unaffected.
 | `round-state.awk` | reads each round once to detect errors, completion and continuation with bounded memory |
 | `quota.py` | optional account quota reads and small local cache |
 | `platform.sh` | macOS/Linux/WSL2 VM driver and folder-opening adapters |
+| `tools.sh`, `toolkit.py`, `tool-deps.sh` | opt-in installation plans, launchers and guest prerequisites |
+| `AGENT-INSTALL.md` | machine-friendly setup instructions for coding agents |
 | `lima.yaml` | VM definition and firewall |
 | `vm-setup.sh`, `vps-setup.sh` | provisioning (opencode, tools, idle shutdown / VPS firewall) |
 | `vm-AGENTS.md` | rules given to agents inside the VM |

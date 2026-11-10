@@ -35,6 +35,10 @@ tool_run() {
 tools_command() {
   local action="${1:-status}" tool="${2:-}" answer
   case "$action" in
+    plan)
+      shift
+      python3 -B "$HERE/toolkit.py" plan "$@"
+      ;;
     status|list)
       if [[ "$(state)" != Running ]]; then
         say 'Kali, Strix, Shannon and the guest rootless engine are optional. Target stopped; installations not checked.'
@@ -56,6 +60,6 @@ tools_command() {
       lsh sudo bash -s "$tool" < "$HERE/tool-deps.sh" || return 1
       agent python3 -B /home/agent/.local/share/cyber-tools/helpers/toolkit.py install "$tool" --yes
       ;;
-    *) say 'Usage: cyber tools [status | install engine|kali|strix|shannon [--yes]]'; return 2 ;;
+    *) say 'Usage: cyber tools [status | plan [tool] [--json] | install engine|kali|strix|shannon [--yes]]'; return 2 ;;
   esac
 }
