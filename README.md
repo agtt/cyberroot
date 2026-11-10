@@ -1,225 +1,187 @@
 # CyberHutch
 
-Sandboxed AI agents for security research, operated through the `cyber` CLI.
+**An isolated workspace for AI security agents. Bring your own models; add Kali, Strix or Shannon only when you need them.**
 
-**Installing with a coding agent? Read [AGENT-INSTALL.md](AGENT-INSTALL.md).** It gives non-interactive commands, dependency order and a machine-readable install plan. Optional tools stay uninstalled until the user chooses them.
+Run OpenCode inside a separate Linux VM or a configured SSH target, switch models and sessions from the terminal, and copy small deliverables back to your machine.
 
-**Early preview.** A personal workflow tool, open for feedback and contributions. The local macOS workflow has been exercised; Linux/WSL2 adapters currently have offline tests only. This project has not had an independent security audit. Review the security model and host-mode exceptions before using it with sensitive data.
+[Quick start](#quick-start) · [Examples](#three-practical-workflows) · [Optional tools](#optional-tools) · [Agent setup](AGENT-INSTALL.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
-A small CLI that runs AI coding/security agents ([opencode](https://opencode.ai)) inside a locked-down
-[Lima](https://lima-vm.io) VM, with a terminal interface for switching models and sessions.
+![Scripted CyberHutch terminal walkthrough](docs/demo.svg)
 
-The agent gets a full Linux box with open internet, but it cannot read your files, reach your Mac's
-localhost, or touch your home network. You get live output, automatic "keep going", model fallback,
-and results copied back to a folder on the host.
+*25-second scripted preview — no live scan, credentials or model results.* [Terminal cast](docs/demo.cast); optionally play it with `asciinema play docs/demo.cast`. No player package is required to use CyberHutch.
 
-```
-  ◆ CYBER ai-lab
-  │ sandbox  ● running · Mac and home network blocked · internet open
-  │ model    glm-free opencode/glm-5.3-flash-free · sandbox
-  │ session  new
-  ╰ type a task · / commands · /s sessions · /model · Ctrl-D quit
+**Early preview:** macOS Apple Silicon is the exercised host workflow. Linux/WSL2 adapters have offline tests; a real Linux/WSL2 host setup has not been validated. See [validation limits](#status-and-validation).
 
-cyber glm-free ❯
-```
+## Who is it for?
 
-> **Use it only on systems you own or are explicitly authorised to test.** The sandbox protects *your*
-> machine; it does not make scanning or attacking someone else's systems legal. The bundled agent rules
-> default to static analysis and tell the model not to send requests to targets unless you ask.
+- Researchers who want a separate workspace for AI-assisted code and APK review.
+- Developers who want their own API models and optional security tools in one terminal workflow.
+- Coding agents that need explicit, machine-readable installation steps.
 
-## Requirements
+CyberHutch coordinates existing agents and tools. It does not provide its own vulnerability-discovery engine or guarantee that a model's finding is correct. Test only systems you own or are explicitly authorized to assess.
 
-- macOS, Linux, or Windows through WSL2 (run the CLI in the WSL Linux shell). Apple Silicon uses Lima's `vz` driver; Intel macOS/Linux/WSL2 select `qemu` for new local VMs. Existing VMs are unchanged. Linux/WSL2 adapters have offline tests; a real Linux/WSL2 VM has not yet been validated.
-- On Linux/WSL2, install Bash, Perl, Python 3, curl, OpenSSH and the standard Unix tools. For local VMs also install Lima 2.0+ and QEMU. Fast local QEMU requires usable hardware acceleration (`/dev/kvm` on Linux); if WSL2 cannot expose it, use an SSH target instead of nesting a slow VM. See [Lima's QEMU requirements](https://lima-vm.io/docs/config/vmtype/qemu/).
-- For a local VM: [Lima](https://lima-vm.io) 2.0+ (`brew install lima` on macOS). An SSH target does not require local Lima.
-- Optional: `fzf` for the pickers (`brew install fzf` on macOS; falls back to numbered lists without it).
-- Optional: `opencode` on the host (only used to pin the same version in the VM; otherwise the latest is installed), `claude` (Claude Code) for host-side models
+## Quick start
 
-## Install
+Host prerequisites: Bash, Git, Perl, Python 3, curl, OpenSSH and standard Unix tools. Local VMs require [Lima 2.0+](https://lima-vm.io); Linux/Intel hosts also need QEMU. `fzf` is optional; menus work without it. SSH targets do not need local Lima.
 
 ```bash
 git clone https://github.com/agtt/cyberhutch.git ~/cyber-cli
 cd ~/cyber-cli
-./ailab up       # base guest only; optional integrations remain uninstalled
-./ailab          # open the interface
+./ailab doctor        # read-only checks; never boots a target or calls a model
+./ailab setup         # choose local VM/SSH and model; optional tools start unselected
+./ailab               # interactive interface
 ```
 
-For a convenient human-facing command, add `alias cyber="$HOME/cyber-cli/ailab"` to `~/.zshrc` (Zsh) or `~/.bashrc` (Bash on Linux/WSL2), then reload that shell file. The examples below use `cyber`; agents can always call `./ailab` directly from the checkout, without changing shell configuration.
+The wizard saves target/model preferences, shows the proposed commands and asks before provisioning. Decline that last step to configure only. You can also use `./ailab up` for base setup directly. A first interactive launch without a saved default model opens the wizard automatically.
 
-`cyber` works from any directory. On first use it creates your local `models.txt` and `opencode.jsonc`
-from the `*.example` files; both are git-ignored.
+For a convenient `cyber` command, add `alias cyber="$HOME/cyber-cli/ailab"` to your `~/.zshrc` or `~/.bashrc`, then reload that file. Agents should call `./ailab` directly; aliases are unnecessary.
 
-## Using it
+**Nothing optional is installed by base setup:** Kali, Strix, Shannon, their guest Docker/Node/Bun dependencies and quota network checks all require an explicit choice. Local templates create ignored `models.txt` and `opencode.jsonc` files on first use; existing settings are kept.
 
-Type a task and press Enter. It runs with the selected model in the current session, so follow-up
-messages keep their context. Everything else is a slash command (type `/` for a searchable menu):
+## What you get
 
-| Command | What it does |
+| Feature | Behavior |
 |---|---|
-| `/model` | pick a model (becomes the default) |
-| `/s`, `/sessions` | switch session; `/recent` lists the latest, `/1`–`/9` jump to one; `/sessions rm` deletes |
-| `/new` | start a new session |
-| `/add`, `/rm` | add a model from your providers' catalogs (or `provider/model`), remove a shortcut |
-| `/fallback a b c` | models to switch to, in order, when one hits a limit or errors |
-| `/rounds N` | auto-continue limit (0 = unlimited) |
-| `/quota` | check supported providers' balances once |
-| `/quota on`, `/quota off` | enable/disable automatic quota checks (default off) |
-| `/tools` | optional Kali, Strix, Shannon and guest rootless engine availability |
-| `/tools plan <name> --json` | inspect one tool's dependency/install commands without downloads |
-| `/tools install <name>` | explicitly install one optional tool |
-| `/kali`, `/strix`, `/shannon` | run an installed tool; the AI tools use the selected API model |
-| `/claude` | open Claude Code on the host (outside the sandbox) |
-| `/tui`, `/sh` | opencode's own TUI / a shell, inside the VM |
-| `/status`, `/clean` | VM, firewall, memory, disk / pick what to delete |
-| `!cmd` | run one command inside the VM |
+| Isolated OpenCode workspace | Separate Linux guest, no host folder sharing, unprivileged agent |
+| Your own models | Configured OpenAI-compatible providers and model shortcuts |
+| Sessions and live output | Pick/resume sessions, stream output and retain local logs |
+| Bounded continuation | Continue unfinished tool rounds; default limit 12, `0` explicitly removes it |
+| Model fallback | Switch configured models on provider limit/availability errors |
+| Optional integrations | Kali CLI, Strix and Shannon, independently selected |
+| Diagnostics | `doctor` checks dependencies, runtime, configuration and tool state |
+| Agent installation plans | JSON argument arrays in dependency order; no selection means no installs |
+| Small deliverables | Copy files up to three levels deep and under 10 MB; `pull all` is explicit |
+| Optional quota display | Supported account APIs show balances; unsupported quotas remain unknown |
 
-Without the interface:
+Strix/Shannon use their own execution loops, worker images, reports and exit codes. CyberHutch's OpenCode fallback/continuation loop does not wrap those upstream engines.
+
+## Three practical workflows
+
+The commands below use the optional `cyber` alias. All project paths refer to the **guest**, not your host filesystem. Get code into the guest with `cyber sh` and an authorized repository clone or explicit file copy.
+
+### 1. Source code review
 
 ```bash
-cyber "task"                  # default model
-cyber glm-free "task"         # a shortcut from models.txt
-cyber openrouter/x "task"     # any provider/model
-cyber -c "keep going"         # continue the last session
-cat notes.txt | cyber "summarise this"
-cyber help                    # everything else
+cyber sh
+# Inside the guest: clone your authorized repository into ~/work/project, then exit.
+cyber "Review ~/work/project for security issues using static analysis only. Save evidence and findings to ~/work/project/REPORT.md."
+cyber pull
 ```
 
-### Never stopping early
+Small deliverables appear under the checkout's `out/work/`. Treat model findings as candidates to verify.
 
-A run does not end just because the model paused. If a round used tools or ended with a question or an
-offer ("I can do X if you want"), `continue` is sent automatically in the same session until the model
-writes `CYBER_DONE` as its last non-empty line or the round limit is reached (`AILAB_ROUNDS`, default 12, `0` = unlimited). Errors take precedence over the completion marker. Reaching the round limit exits with status 2, so an unfinished run is not reported as successful. If a
-model hits a rate/usage limit, the run switches to the next model in the fallback list and skips the
-limited one for 30 minutes. Only explicit error lines are checked for quota/availability signals; ordinary words such as “generate” do not trigger fallback. The Mac is kept awake while a task runs, and the keep-awake process stops when the task ends.
+### 2. Static APK review
 
-### Models
+```bash
+cyber sh -c 'mkdir -p ~/work/mobile && cat > ~/work/mobile/app.apk' < app.apk
+cyber "Inspect ~/work/mobile/app.apk statically. Reuse installed JADX/apktool, do not run the app, and save ~/work/mobile/REPORT.md."
+cyber pull
+```
 
-Quota status appears in the opening header and model picker. Network checks are **optional and off by default**: `/quota` (or `cyber quota`) checks once; `/quota on` enables checks on opening the interface or model list. `/quota off` disables automatic checks again. Checks share a two-minute cache across models and make only read-only account requests, never inference calls or VM startup. Each request has a short timeout; quota failures do not stop tasks. The helper uses Python's standard library and curl; no additional packages or virtual environment are installed.
+The base guest includes APK analysis utilities; the optional Kali integration is not required. Large intermediate/decompiled trees stay in the guest unless explicitly pulled.
 
-Use any provider you configure; model selection does not depend on quota support. The optional quota reader currently understands the [OpenRouter account API](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key), showing account balance, API-key spending allowance and today's usage when those fields are available. An uncapped key does not mean unlimited account credit. Models using the same provider/key share those balances. Unsupported quota APIs, OpenCode free models and host Claude entries show `remaining unknown`; host Claude usage can be checked in Claude's `/usage`. Cached readings show their age; old readings are labelled stale. The local 30-minute retry cooldown is shown separately and is **not** a provider quota reset time.
+### 3. Authorized web assessment with an optional tool
 
-`models.txt` maps shortcuts to `provider/model`. Three kinds:
+After explicitly installing Strix and its guest rootless engine, choose your configured API model:
 
-- **opencode Zen** models (`opencode/...`) work without a key.
-- **Your own providers**: any OpenAI-compatible API. `cyber key <name>` stores the key, `cyber config`
-  opens `opencode.jsonc` (see the commented block in `opencode.example.jsonc`), then `/add` lists that
-  provider's `/models` and writes the entry for you.
-- **`claude/<model>`** entries run Claude Code **on the host, outside the sandbox**, in `CYBER_HOST_DIR`
-  (or the directory in `./hostdir`, or where you ran `cyber`). They are marked `host` everywhere.
+```bash
+cyber strix --model research -- --target https://your-authorized-app.example
+# Or, after choosing Shannon instead:
+cyber shannon --model research -- start -u https://your-authorized-app.example -r ./project
+```
 
-## Security model
+These commands can actively test the supplied target and incur provider costs. Installing a tool does not run a scan or authorize testing any target.
 
-| | |
-|---|---|
-| Host files | not shared (`mounts: []`, `plain: true`) |
-| Host localhost, LAN, Tailscale/CGNAT, link-local, IPv6 | blocked by nftables inside the VM; `cyber` refuses to run if the rules are not loaded |
-| Internet | open; traffic leaves from your IP (or the VPS's) |
-| Privileges | the agent is user `agent` with no sudo, so it cannot change the firewall |
-| Permissions inside the VM | everything allowed: the VM is the boundary |
+## Optional tools
 
-Know the limits:
-
-- **API keys you sync into the VM are readable by the agent.** Use scoped or low-limit keys.
-- The agent has unrestricted internet. It can send anything it can read inside the VM anywhere.
-- Prompt injection from analysed content is contained by the VM, not prevented.
-- `claude/...` models are *not* sandboxed.
-
-## Disk and performance
-
-- VM: 6 CPUs, 10 GB RAM, 30 GB sparse disk (`lima.yaml`; change with `limactl edit ai-lab --cpus N --memory N`). It shuts down after `AILAB_IDLE_MIN` idle minutes (default 60) and boots in a few seconds.
-- Only reports and small files (≤3 levels deep, <10 MB) are copied to `out/work/` on the host; big intermediate output stays in the VM. `cyber pull all` copies everything.
-- Failed copies show a warning and keep the previous sync timestamp so `cyber pull` can retry the missed files.
-- Logs go to `out/logs/`; anything older than a day is gzipped.
-- `cyber clean` shows what uses space (VM projects, host copies, old logs) and deletes only what you select and confirm. Space freed in the VM is returned to the host (trim).
-
-## Optional security tools
-
-**All integrations are opt-in.** Normal startup, model selection and `cyber up` do not download Kali, Strix, Shannon, Bun, Node or Docker. Small launcher helpers are copied during configuration sync. Install only the components you want, inside the selected VM/SSH target:
-
-| Optional component | Purpose | Install only when chosen |
+| Component | Purpose | Explicit install |
 |---|---|---|
-| `engine` | Guest rootless Docker, needed to run the other integrations | `cyber tools install engine` |
+| `engine` | Guest rootless Docker shared by the integrations | `cyber tools install engine` |
 | `kali` | Compact Kali image with selected CLI utilities | `cyber tools install kali` |
 | `strix` | Pinned Strix CLI | `cyber tools install strix` |
-| `shannon` | Pinned Shannon CLI and its Node/Bun prerequisites | `cyber tools install shannon` |
+| `shannon` | Pinned Shannon CLI plus its Node/Bun prerequisites | `cyber tools install shannon` |
 
-Check availability with `cyber tools`; a stopped target stays stopped. To install **only Strix**, for example:
+Install **only** what you choose. For example, a Strix setup needs the engine and Strix, not Kali or Shannon:
 
 ```bash
-cyber tools plan strix --json       # offline dependency/command plan; no installation
-cyber tools install engine          # shared runtime, chosen as a Strix dependency
-cyber tools install strix           # does not install Kali or Shannon
-cyber strix --version               # no API key or running Docker needed
+cyber tools plan strix --json    # inspect first; no downloads or target startup
+cyber tools install engine      # asks for confirmation
+cyber tools install strix       # asks for confirmation
+cyber strix --version           # no model key or running Docker needed
 ```
 
-For agents, use `./ailab tools plan <chosen-tool> --json` and execute its `commands` arrays only after the user authorizes that integration. `./ailab tools plan --json` lists the optional catalog with **no install commands**. The [agent installation guide](AGENT-INSTALL.md) explains base setup, guest administrator prerequisites, API model selection and cleanup.
-
-Each install asks first (`--yes` is available for explicitly approved automation). Installers never mount the computer's Docker socket or grant the agent access to a rootful engine. Docker runs rootless inside the guest; existing host Docker settings are ignored. Downloads, images and package caches can occupy hundreds of MB or more. Strix/Shannon download their own worker images when first used, after you explicitly choose the optional tool. No upstream pentest or paid model request is run during installation.
-
-Use an installed integration from the terminal or the matching slash command:
+Agents can use the plan's `commands` arrays with `--yes` after the user authorizes that integration. `cyber tools plan --json` returns the catalog with an empty command list. See [AGENT-INSTALL.md](AGENT-INSTALL.md) for base setup, prerequisites, credentials and cleanup.
 
 ```bash
 cyber kali -- nmap -sT -h                         # offline by default
-cyber kali --network -- curl https://example.com # only for an authorized network task
-cyber strix --help
-cyber strix --model my-model -- --target https://your-authorized-app.example
-cyber shannon --model my-model -- start -u https://your-authorized-app.example -r ./project
+cyber kali --network -- curl https://example.com # explicitly authorized network work only
+cyber tools                                      # availability; stopped targets stay stopped
 ```
 
-All paths are inside the guest. Kali maps the guest's `~/work` to `/work`, with a read-only root, dropped capabilities, no network by default and a 2 GiB memory limit. Enable network explicitly with `--network`; use TCP-connect scans (`nmap -sT`) rather than raw-socket scans. Strix/Shannon manage their own worker containers; the outer VM remains the host isolation boundary. Their engines, network activity, resource requirements, exit codes and findings follow the upstream tools, not CyberHutch's OpenCode auto-continue/fallback loop.
+Kali has a read-only root, dropped capabilities, a 2 GiB memory limit and no network by default. Its `/work` is the guest's `~/work`; the computer's Docker socket is never shared. Strix/Shannon manage their own worker containers inside the outer guest boundary. Packages, worker images and caches can occupy hundreds of MB or more. Their worker images may download on first real use.
 
-The selected **configured OpenAI-compatible API provider** supplies the endpoint, upstream model ID and key. The API key is passed through the child environment, never argv or generated model files. Shannon gets a temporary Chat Completions model definition and follows the scan until completion. Credentials are read inside the guest; run `cyber sync` after changing configuration. OpenCode's free models and host Claude sessions do not provide reusable API credentials, so select your own configured API model for these tools. Model capability/tool-calling support and provider account access still depend on the model you choose. For native tool configuration, use `cyber sh` and the installed executable under `~/.local/share/cyber-tools/`.
+Upstream distributions are downloaded separately under their own licenses: [Strix](https://github.com/usestrix/strix) (Apache-2.0), [Shannon](https://github.com/KeygraphHQ/shannon) (AGPL-3.0), [Kali](https://www.kali.org/docs/containers/official-kalilinux-docker-images/). The guest engine uses [rootless Docker](https://docs.docker.com/engine/security/rootless/).
 
-Agents inside the guest can use `~/.local/bin/cyber-tool status` and `~/.local/bin/cyber-tool run strix --model provider/model -- --target <authorized-target>` (or `run shannon ...`). Agents are instructed not to install these tools unless the user explicitly chooses them. `cyber down` stops the local VM and its tool services; installed optional packages remain available for later use.
+## Models and credentials
 
-Upstream projects are downloaded separately under their own licenses, not bundled into this MIT repository: [Strix](https://github.com/usestrix/strix) (Apache-2.0), [Shannon](https://github.com/KeygraphHQ/shannon) (AGPL-3.0), [Kali images](https://www.kali.org/docs/containers/official-kalilinux-docker-images/). Installation follows [rootless Docker](https://docs.docker.com/engine/security/rootless/); model routing follows [Strix configuration](https://github.com/usestrix/strix/blob/main/docs/advanced/configuration.mdx) and [Shannon providers](https://keygraph.io/docs/how-to/ai-providers/).
+Use `/model` to select a shortcut, `/add` to browse configured provider catalogs, or `cyber add research provider/model-id` to add a model without a build. A new OpenAI-compatible provider can be added by `cyber setup` or `cyber config`; the wizard preserves existing settings and serializes JSONC as formatted JSON.
 
-## VPS target
+Enter a key privately with `cyber key <provider>`, then run `cyber sync`. Do not put credentials in command arguments, reports or commits. See `opencode.example.jsonc` for the provider structure.
 
-The SSH target is also the practical option for WSL2 hosts without working nested virtualization. Run Cyber inside your WSL2 distro, keep the checkout in its Linux filesystem, then use the commands below. The WSL2 distro itself is not treated as the agent sandbox; the agent still runs in the separate Lima VM or SSH target. `/out` uses `wslview` when installed, otherwise prints the folder path on a headless shell. No desktop-opening utility is required for tasks.
+- **OpenCode free presets:** no API key required; availability depends on the provider.
+- **Your API providers:** custom endpoint, upstream model ID and key.
+- **Host Claude entries:** `claude/<model>` deliberately opens Claude Code **outside the sandbox** in `CYBER_HOST_DIR`/`hostdir`/the current directory. They are marked `host`.
 
-```bash
-cyber target vps my-ssh-host   # any host from ~/.ssh/config, Debian/Ubuntu, root or passwordless sudo
-cyber up                       # provisions tools, the agent user and the egress firewall
-cyber target local             # switch back; one-off: AILAB_TARGET="vps my-ssh-host" cyber "task"
-```
+Strix/Shannon reuse a configured **HTTPS OpenAI-compatible API provider**. Keys go through the child environment, not argv or generated model files. Shannon gets temporary Chat Completions model metadata. OpenCode free models and host Claude sessions have no transferable API credentials. Tool-calling support and account access depend on your chosen model.
 
-On a VPS the firewall only restricts the `agent` user (private ranges and cloud metadata), so your own
-SSH access is unaffected.
+Quota checks are optional and off by default. `/quota` checks once; `/quota on` enables two-minute cached checks; `/quota off` disables them. The current reader supports the [OpenRouter account API](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key). Other providers remain usable and display `remaining unknown`. Account/key balances are shared across models using that provider/key; a local retry cooldown is not a provider quota-reset timer. Cached data shows its age. No model call is made for a quota check.
 
-## Files
+## Terminal shortcuts
 
-| | |
+| Command | Purpose |
 |---|---|
-| `ailab` | the CLI |
-| `ui.sh` | the interactive interface |
-| `livelog.pl` | colours live output and writes the log |
-| `round-state.awk` | reads each round once to detect errors, completion and continuation with bounded memory |
-| `quota.py` | optional account quota reads and small local cache |
-| `platform.sh` | macOS/Linux/WSL2 VM driver and folder-opening adapters |
-| `tools.sh`, `toolkit.py`, `tool-deps.sh` | opt-in installation plans, launchers and guest prerequisites |
-| `AGENT-INSTALL.md` | machine-friendly setup instructions for coding agents |
-| `lima.yaml` | VM definition and firewall |
-| `vm-setup.sh`, `vps-setup.sh` | provisioning (opencode, tools, idle shutdown / VPS firewall) |
-| `vm-AGENTS.md` | rules given to agents inside the VM |
-| `*.example*` | templates for your local `models.txt` and `opencode.jsonc` |
+| `/setup`, `/doctor` | Guided setup and read-only diagnostics |
+| `/model`, `/models` | Select/list model shortcuts |
+| `/s`, `/recent`, `/1`–`/9`, `/new` | Select, resume or start sessions |
+| `/add`, `/rm` | Manage model shortcuts |
+| `/fallback a b`, `/rounds N` | Fallback order and continuation limit |
+| `/tools`, `/tools plan <name> --json` | Optional tools and offline install plans |
+| `/kali`, `/strix`, `/shannon` | Run an installed optional integration |
+| `/quota`, `/quota on`, `/quota off` | Optional balance checks |
+| `/pull`, `/out`, `/log` | Deliverables, output folder and latest log |
+| `/status`, `/clean`, `/down` | Runtime, confirmed cleanup and local VM shutdown |
+| `/sh`, `!command` | Guest shell or one guest command |
+| `/claude` | Host Claude Code; outside the sandbox |
 
-## Environment
+Without the interface: `cyber "task"`, `cyber research "task"`, `cyber -c "continue"`, or pipe input with `cat notes.txt | cyber "summarize this"`. `cyber help` lists commands. `cyber --version` prints the CLI version without starting a guest.
 
-`AILAB_ROUNDS`, `AILAB_THINKING=0`, `AILAB_IDLE_MIN`, `AILAB_TARGET`, `AILAB_SSH_OPTS`, `OPENCODE_VERSION`,
-`CYBER_SECRETS` (key directory), `CYBER_HOST_DIR`, `NO_COLOR`.
-
-## Offline checks
+## Diagnostics and remote targets
 
 ```bash
-bash -n ailab ui.sh platform.sh tools.sh tool-deps.sh vm-setup.sh vps-setup.sh
-python3 -B -m unittest test_cli test_quota test_tools
+cyber doctor             # local prerequisites, configuration and current target state
+cyber doctor --json      # machine-readable; no secrets or provider authentication
+cyber doctor --live      # also perform read-only SSH checks for a configured remote target
+cyber target vps my-ssh-host
+cyber up
+cyber target local
 ```
 
-The regression checks use mocked commands and temporary files inside the repository; they do not start a VM or call model APIs. Runs still use `--standalone` to avoid the known background-service hang.
+Default diagnostics never start a VM, install packages, contact a model or connect to a remote SSH target. A running local guest can be checked read-only for firewall/tool state. Keys are checked for presence, not validity; no credential value is displayed. A stopped target leaves guest checks unknown rather than silently starting it.
 
-Optional integration validation: 19 focused checks passed inside a Linux guest. The actual Linux arm64 Strix 1.7.0 and Shannon 3.5.0 installers and `version`/`help` entry points were exercised without credentials or model calls. A temporary Kali image was checked with network disabled, capabilities dropped and a read-only root. Temporary binaries, Node/Bun/package caches and the test image were removed afterwards. A complete rootless-engine installation, the custom Kali image build, upstream worker startup and paid-model pentest runs have not been exercised end to end; they still depend on upstream runtime requirements and the selected provider/model.
+On Windows use WSL2's Linux shell. Without usable nested QEMU/KVM, prefer an SSH target. A WSL2 distro itself is not the agent sandbox. `/out` uses `wslview` if present, or prints the path on a headless shell.
 
-## License
+## Isolation and disk use
 
-MIT
+The local Lima guest uses `mounts: []`, `plain: true` and firewall rules blocking host/private-network destinations, with the agent running without sudo. VPS rules restrict the agent's private-network egress. Internet is open; traffic uses your/VPS IP. These restrictions do not apply to explicit host Claude sessions.
+
+Synced API keys are readable by the guest agent; use scoped/low-limit keys. Anything readable inside the guest can be sent to the internet. Isolation does not prevent prompt injection or make model findings reliable.
+
+The VM has 6 CPUs, 10 GB RAM and a 30 GB sparse disk, with configurable idle shutdown (default 60 minutes). `cyber down` stops it; installed optional tools remain available. Persistent optional tool services can keep the guest active. Logs older than a day are compressed. Failed pulls preserve the old sync timestamp for retry. `cyber clean` deletes only selected, confirmed work/log data and trims guest free space; it does not uninstall optional package/engine stores. No global Docker prune is used.
+
+## Status and validation
+
+This is an MIT-licensed **early preview**, not an independently audited security boundary or a promise of verified vulnerabilities. Offline checks cover configuration preservation, explicit install plans, model routing, diagnostics, command arguments and default isolation settings. Real Linux arm64 Strix/Shannon install and help/version checks passed. A temporary official Kali image passed read-only root, zero-capability and offline-network checks; test downloads/images were removed.
+
+Full rootless-engine installation, the custom Kali image build and complete upstream worker/paid-model pentest runs remain unverified end to end. macOS Apple Silicon is the exercised host; Linux/WSL2 host adapters have offline tests only.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for focused checks, [AGENT-INSTALL.md](AGENT-INSTALL.md) for agent installation and [CHANGELOG.md](CHANGELOG.md) for preview releases. The demo is generated locally from scripted fixtures with `python3 -B scripts/render-demo.py`; no live findings or credentials are recorded.

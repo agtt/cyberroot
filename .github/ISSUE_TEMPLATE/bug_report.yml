@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible problem without sharing credentials or private logs.
+body:
+  - type: input
+    id: version
+    attributes:
+      label: CLI version
+      description: Output of ./ailab --version
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Host and target
+      placeholder: macOS / Linux / WSL2; local Lima or SSH target
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and expected behavior
+      description: Use dummy targets and redact private project/provider details.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Relevant ./ailab doctor output or a small error excerpt. Never paste keys, credentials or raw private logs.

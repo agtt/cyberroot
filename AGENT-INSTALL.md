@@ -6,10 +6,12 @@ Use the checked-in CLI directly. Shell aliases are optional for humans and are n
 
 ```bash
 ./ailab help
+./ailab --version
+./ailab doctor --json
 ./ailab tools plan --json
 ```
 
-These commands do not boot a VM, install optional packages, download images or call a model. First use may create ignored configuration files from the examples. Never replace existing `models.txt`, `opencode.jsonc`, `target`, API key files or existing user work.
+These commands do not boot a VM, install optional packages, create local configuration, download images or call a model. They use shipped templates when settings do not exist. Default diagnostics do not connect to SSH targets; use `doctor --live` only when the user asks to check that target. Setup and normal operation initialize ignored configuration from the examples when needed. Never reset existing `models.txt`, `opencode.jsonc`, `target`, API key files or user work to template defaults.
 
 Check the host prerequisites in README before booting: Bash, Git, Perl, Python 3, curl and standard Unix tools; Lima for a local VM, or SSH access to a configured Debian/Ubuntu target. Optional `fzf` only improves pickers. On WSL2 use its Linux shell; a working QEMU/KVM environment or an SSH target is needed. Report missing host prerequisites; do not install them without the user's authorization.
 
@@ -24,6 +26,8 @@ After the user requests base installation:
 ```
 
 `up` provisions the base guest and syncs launchers. It does not install Kali, Strix, Shannon or their Docker/Node/Bun dependencies. All optional installations run inside the chosen guest. Host Claude entries deliberately run outside the sandbox and are a separate user choice.
+
+For a human-guided setup use `./ailab setup`: choose local VM/SSH, an existing/free/API model and optional integrations (none selected by default). It saves preferences, shows the command plan and asks before starting or provisioning. The new-provider path preserves existing settings but reformats JSONC comments; API keys are entered separately with `./ailab key <provider>`. Agents should prefer explicit commands and JSON plans over scripting terminal prompts.
 
 ## 3. Plan only the integration the user selected
 

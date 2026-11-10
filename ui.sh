@@ -54,6 +54,8 @@ ui_header() {
 }
 
 UI_CMDS="/model     pick a model (becomes the default)
+/setup     guided target/model setup (optional tools unselected)
+/doctor    check dependencies, runtime and model configuration without model calls
 /sessions  switch session (/s; /sessions rm deletes one)
 /recent    list recent sessions; /1-/9 jumps to one
 /new       start a new session
@@ -325,6 +327,8 @@ ui_cmd() {
   fi
   # shellcheck disable=SC2086
   case "$c" in
+    /doctor)       onboarding_command doctor || true ;;
+    /setup)        if onboarding_command setup; then CUR_MODEL="$(default_model)"; CUR_SESS=""; CUR_TITLE=""; ui_header; fi ;;
     /[1-9])        ui_session_n "${c#/}" ;;
     /recent|/r)    ui_recent ;;
     /model|/m)     ui_model $rest ;;
@@ -358,6 +362,7 @@ ui_cmd() {
 
 ui_main() {
   set +e
+  if [[ ! -f "$DEFAULT" && -t 0 && -t 1 ]]; then onboarding_command setup || return 1; fi
   CUR_MODEL="$(default_model)"
   quota_auto_refresh
   history -r "$UI_HIST" 2>/dev/null

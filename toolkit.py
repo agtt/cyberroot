@@ -44,6 +44,22 @@ def root():
     return Path(os.environ.get("CYBER_TOOLS_HOME", str(Path.home() / ".local/share/cyber-tools")))
 
 
+def status_report():
+    environment = runtime_env()
+    engine_present = bool(shutil.which("docker", path=environment["PATH"]) and
+                          shutil.which("dockerd-rootless-setuptool.sh", path=environment["PATH"]))
+    image_present = None
+    if engine_present and Path(environment["XDG_RUNTIME_DIR"], "docker.sock").is_socket():
+        try:
+            image_present = bool(run(["docker", "images", "--quiet", KALI_IMAGE],
+                                     capture_output=True, text=True, timeout=3).stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return {name: {"optional": True, "installed": installed} for name, installed in (
+        ("engine", engine_present), ("kali", image_present), ("strix", (root() / "strix/strix").is_file()),
+        ("shannon", (root() / "shannon/node_modules/.bin/shannon").is_file()))}
+
+
 def runtime_env():
     env = os.environ.copy()
     # The host launcher changes to the unprivileged guest user. Some upstream
@@ -251,10 +267,13 @@ def main():
     if os.geteuid() == 0:
         raise ValueError("Optional tools must run as the unprivileged guest agent, never root.")
     if options.action == "status":
-        for name, path in (("engine", Path.home() / "bin/docker"), ("strix", root() / "strix/strix"),
-                           ("shannon", root() / "shannon/node_modules/.bin/shannon")):
-            print(f'{name}: {"installed" if path.is_file() else "not installed (optional)"}')
-        print("kali: optional Docker image; check with cyber kali -- bash -lc 'command -v nmap'")
+        report = status_report()
+        if options.json:
+            print(json.dumps(report))
+        else:
+            for name, value in report.items():
+                state = value["installed"]
+                print(f'{name}: {"installed" if state else "not installed" if state is False else "not checked (engine stopped)"} (optional)')
     elif not options.tool:
         parser.error("choose engine, kali, strix or shannon")
     elif options.action == "install":

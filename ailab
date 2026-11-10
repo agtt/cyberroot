@@ -38,9 +38,17 @@ OUT="$HERE/out"
 MODELS="$HERE/models.txt"
 CONFIG="$HERE/opencode.jsonc"
 DEFAULT="$HERE/default"
-# Local, untracked files: created from the examples on first use.
-[[ -f "$MODELS" ]] || cp "$HERE/models.example.txt" "$MODELS"
-[[ -f "$CONFIG" ]] || cp "$HERE/opencode.example.jsonc" "$CONFIG"
+# Inspection commands use templates without creating user configuration.
+case "${1:-}:${2:-}" in
+  doctor:*|help:*|-h:*|--help:*|version:*|-v:*|--version:*|tools:plan|tools:status|tools:list|tools:)
+    [[ -f "$MODELS" ]] || MODELS="$HERE/models.example.txt"
+    [[ -f "$CONFIG" ]] || CONFIG="$HERE/opencode.example.jsonc"
+    ;;
+  *)
+    [[ -f "$MODELS" ]] || cp "$HERE/models.example.txt" "$MODELS"
+    [[ -f "$CONFIG" ]] || cp "$HERE/opencode.example.jsonc" "$CONFIG"
+    ;;
+esac
 # API keys: <provider>-api-key files. CYBER_SECRETS overrides; a ../.secrets next to the repo is used if it exists.
 SECRETS="${CYBER_SECRETS:-}"
 if [[ -z "$SECRETS" ]]; then
@@ -50,9 +58,18 @@ fi
 HOST_DIR="${CYBER_HOST_DIR:-$(cat "$HERE/hostdir" 2>/dev/null || pwd)}"
 IDLE_MIN="${AILAB_IDLE_MIN:-60}"
 
-TARGET="${AILAB_TARGET:-$(cat "$HERE/target" 2>/dev/null || echo local)}"
-MODE="${TARGET%% *}"; HOST="${TARGET#* }"
-if [[ "$MODE" != vps || -z "$HOST" || "$HOST" == "$MODE" ]]; then MODE=local; HOST=; IDLE=$IDLE_MIN; else IDLE=0; fi
+load_target() {
+  TARGET="${AILAB_TARGET:-$(cat "$HERE/target" 2>/dev/null || echo local)}"
+  MODE="${TARGET%% *}"; HOST="${TARGET#* }"
+  if [[ "$MODE" != vps || -z "$HOST" || "$HOST" == "$MODE" ]]; then MODE=local; HOST=; IDLE=$IDLE_MIN; else IDLE=0; fi
+}
+load_target
+
+onboarding_command() {
+  local command="$1"; shift
+  python3 -B "$HERE/onboarding.py" "$command" --here "$HERE" --secrets "$SECRETS" --target "$TARGET" --vm "$VM" "$@" || return $?
+  if [[ "$command" == setup ]]; then load_target; fi
+}
 
 lsh() {
   if [[ $MODE == local ]]; then
@@ -331,6 +348,8 @@ default_model() {
 OC_SUBCMDS=" upgrade update uninstall acp api debug auth mcp plugin models stats mini session service reload pair serve "
 
 case "${1:-}" in
+  version|--version|-v) printf 'CyberHutch %s\n' "$(cat "$HERE/VERSION")" ;;
+  setup|doctor) command="$1"; shift; onboarding_command "$command" "$@" ;;
   up)     up; sync_cfg; echo "ai-lab ready ($MODE${HOST:+ $HOST})" ;;
   down)
     if [[ $MODE == vps ]]; then echo "vps mode: the VPS is not shut down from here (use the provider panel)"; exit 0; fi
@@ -385,6 +404,7 @@ case "${1:-}" in
   -h|--help|help)
     sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     printf '\nOptional tools (never installed automatically):\n  cyber tools [status | install engine|kali|strix|shannon]\n  cyber kali [--network] -- <command>\n  cyber strix|shannon [--model shortcut] -- <tool arguments>\n'
+    printf '\nGetting started:\n  cyber setup                 guided target/model setup; optional tools unselected\n  cyber doctor [--json]        read-only local checks; never starts a VM\n  cyber doctor --live          also check a configured SSH target\n'
     ;;
   run)
     shift; ensure_up; set +e; oc_run "$@"; rc=$?; set -e; pull; exit "$rc" ;;
