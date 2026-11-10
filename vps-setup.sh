@@ -1,5 +1,5 @@
 #!/bin/bash
-# Prepares a VPS as an ai-lab target (Ubuntu/Debian). Runs as root, safe to re-run.
+# Prepares a VPS as a CyberRoot target (Ubuntu/Debian). Runs as root, safe to re-run.
 # `cyber target vps <ssh-host>` + `cyber up` sends it automatically.
 #
 # The model runs as user "agent" (no sudo). agent's egress to private networks and cloud metadata
@@ -41,7 +41,7 @@ chmod 755 /usr/local/sbin/ailab-agent-fw
 
 cat > /etc/systemd/system/ailab-agent-fw.service <<'EOF'
 [Unit]
-Description=ai-lab agent egress firewall
+Description=CyberRoot agent egress firewall
 After=network-pre.target
 [Service]
 Type=oneshot

@@ -1,5 +1,5 @@
 # cyber interface: opens when `cyber` is typed alone. Sourced by ailab (bash 3.2 compatible).
-# Type a task -> runs with the selected model in the selected session. "/" -> command menu.
+# Type a task -> runs with the selected model in the selected session. "/" -> live command suggestions (lineedit.py).
 
 UI_HIST="$HERE/.history"
 UI_SESS="$OUT/.sessions"       # cached session list (id \t title \t date), newest first
@@ -14,7 +14,7 @@ ui_pick() {
   local title="$1"; shift
   if command -v fzf >/dev/null; then
     fzf --height=60% --min-height=8 --reverse --border=rounded --border-label=" $title " --prompt='❯ ' --pointer='▶' \
-        --info=inline-right --no-multi --ansi --color='border:magenta,label:magenta:bold,prompt:cyan,pointer:cyan,hl:yellow,hl+:yellow' "$@"
+        --info=inline-right --no-multi --ansi --color='border:28,label:46:bold,prompt:40,pointer:46,hl:46,hl+:46:bold,fg+:46,bg+:-1,info:28,spinner:40,header:34' "$@"
   else
     local lines=() l i=1 n
     while IFS= read -r l; do lines+=("$l"); printf '%s%3d%s  %s\n' "$C_C" "$i" "$C_0" "$l" >&2; i=$((i + 1)); done
@@ -44,11 +44,12 @@ ui_header() {
   local kind; kind="$(ui_kind "$CUR_MODEL")"
   local badge="${C_G}sandbox${C_0}"; [[ $kind == host ]] && badge="${C_Y}host · outside the sandbox${C_0}"
   say
-  say "  ${C_M}${C_B}◆ CYBER${C_0} ${C_D}ai-lab${C_0}"
+  banner "${C_D}v$(cat "$HERE/VERSION")${C_0}" "${C_T}isolated workspace for AI security agents${C_0}"
+  say "  ${C_M}│${C_0}"
   say "  ${C_M}│${C_0} ${C_D}sandbox${C_0}  $(ui_vm_line)"
-  say "  ${C_M}│${C_0} ${C_D}model  ${C_0}  ${C_B}$(ui_short "$CUR_MODEL")${C_0} ${C_D}$CUR_MODEL${C_0} · $badge"
+  say "  ${C_M}│${C_0} ${C_D}model  ${C_0}  ${C_M}${C_B}$(ui_short "$CUR_MODEL")${C_0} ${C_D}$CUR_MODEL${C_0} · $badge"
   say "  ${C_M}│${C_0} ${C_D}quota  ${C_0}  $(quota_data --model "$CUR_MODEL")"
-  say "  ${C_M}│${C_0} ${C_D}session${C_0}  ${CUR_TITLE:-new}${CUR_SESS:+ ${C_D}$CUR_SESS${C_0}}"
+  say "  ${C_M}│${C_0} ${C_D}session${C_0}  ${C_T}${CUR_TITLE:-new}${C_0}${CUR_SESS:+ ${C_D}$CUR_SESS${C_0}}"
   say "  ${C_M}╰${C_0} ${C_D}type a task · ${C_0}${C_C}/${C_0}${C_D} commands · ${C_0}${C_C}/s${C_0}${C_D} sessions · ${C_0}${C_C}/model${C_0}${C_D} · Ctrl-D quit${C_0}"
   say
 }
@@ -76,13 +77,30 @@ UI_CMDS="/model     pick a model (becomes the default)
 /clean     disk usage; pick what to delete
 /pull      copy results from the VM now (/pull all = everything)
 /out       open the output folder (or print its path on a headless host)
-/log       show the latest log
+/log       show the latest log (/log N opens the Nth, see /logs)
+/logs      recent run logs
 /key       save a provider API key
 /config    edit provider config (opencode.jsonc)
 /down      stop the VM
 /clear     clear the screen
 /help      this list
 /quit      quit"
+
+UI_ALIASES="/m=/model /s=/sessions /resume=/sessions /r=/recent /n=/new /list=/models /st=/status /h=/help /?=/help /q=/quit /exit=/quit"
+
+# Read one prompt line into UI_LINE. 0 = line, 1 = EOF, 130 = Ctrl-C.
+# lineedit.py shows matching commands while "/..." is typed; plain readline is the fallback.
+ui_read() {
+  local rc
+  if [[ -z "${CYBER_PLAIN_INPUT:-}" && -t 0 && -t 1 ]] && command -v python3 >/dev/null; then
+    UI_LINE="$(CYBER_CMDS="$UI_CMDS" CYBER_CMD_ALIASES="$UI_ALIASES" python3 -I -B "$HERE/lineedit.py" "$1" "$UI_HIST")"; rc=$?
+    case $rc in 0) return 0 ;; 3) return 1 ;; 130) return 130 ;; esac
+  fi
+  UI_INT=0
+  IFS= read -r -e -p "$1" UI_LINE && return 0
+  echo; (( UI_INT )) && return 130
+  return 1
+}
 
 ui_models_table() {
   quota_auto_refresh
@@ -282,7 +300,7 @@ ui_clean() {
       where = ($1=="vm") ? "VM   work/" $2 : ($1=="mac") ? "Host out/work/" $2 : "Host " $2
       printf "%s\t%s\t%-52.52s %7d MB\n", $1, $2, where, $3 }' \
     | fzf --multi --height=60% --min-height=8 --reverse --border=rounded --border-label=" delete what? Tab = select, Enter = confirm, Esc = cancel " \
-          --prompt='❯ ' --pointer='▶' --marker='✗' --delimiter=$'\t' --with-nth=3 --color='border:magenta,label:magenta:bold,prompt:cyan,pointer:cyan,marker:red')" || return 0
+          --prompt='❯ ' --pointer='▶' --marker='✗' --delimiter=$'\t' --with-nth=3 --color='border:28,label:46:bold,prompt:40,pointer:46,hl:46,hl+:46:bold,fg+:46,bg+:-1,info:28,spinner:40,header:34,marker:red')" || return 0
   [[ -n "$sel" ]] || return 0
   say "${C_Y}Will delete:${C_0}"; cut -f3 <<<"$sel" | sed 's/^/  /' >&2
   read -r -p "Delete these permanently? [y/N] " a; [[ "$a" == y ]] || { say "cancelled"; return 0; }
@@ -348,7 +366,8 @@ ui_cmd() {
     /clean)        ui_clean ;;
     /pull)         ui_up && { pull $rest; say "${C_G}✔${C_0} ${OUT/#$HOME/~}/work"; } ;;
     /out)          mkdir -p "$OUT"; open_output "$OUT" ;;
-    /log)          local f; f="$(ls -t "$OUT"/logs/*.log 2>/dev/null | head -1)"; [[ -n "$f" ]] && less -R "$f" ;;
+    /log)          logs_command "${rest:-1}" ;;
+    /logs)         logs_command ;;
     /key)          if [[ -n "$rest" ]]; then "$HERE/ailab" key $rest; else say "usage: /key <provider>"; fi ;;
     /config)       "$HERE/ailab" config ;;
     /down)         "$HERE/ailab" down ;;
@@ -369,15 +388,14 @@ ui_main() {
   ( ui_sessions_refresh >/dev/null 2>&1 & )
   ui_header
   [[ "${1:-}" == resume ]] && ui_sessions
-  local line p
+  local line p rc
   while :; do
     trap 'UI_INT=1' INT
     p=$'\001'"$C_M$C_B"$'\002'"cyber"$'\001'"$C_0$C_D"$'\002'" $(ui_short "$CUR_MODEL")${CUR_TITLE:+ · $(cut -c1-24 <<<"$CUR_TITLE")}"$'\001'"$C_0$C_C"$'\002'" ❯ "$'\001'"$C_0"$'\002'
-    UI_INT=0
-    if ! IFS= read -r -e -p "$p" line; then
-      if (( UI_INT )); then echo; continue; fi
-      echo; break
-    fi
+    ui_read "$p"; rc=$?
+    (( rc == 130 )) && continue
+    (( rc )) && break
+    line="$UI_LINE"
     line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
     [[ -n "$line" ]] || continue
     history -s "$line"; history -w "$UI_HIST" 2>/dev/null

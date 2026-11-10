@@ -4,6 +4,8 @@
 #
 #   cyber                        interface: type a task, "/" for commands (/model /sessions /new /add /rm ...)
 #   cyber resume                 interface, opening with the session picker
+#   cyber sessions               list sessions (cyber resume opens one)
+#   cyber logs [N | -f]          recent run logs / open the Nth / follow the newest
 #   cyber "task"                 run with the default model (live output + log)
 #   cyber <shortcut> "task"      run with that model (models.txt)
 #   cyber <provider/model> "task"    run with a model that has no shortcut
@@ -40,7 +42,7 @@ CONFIG="$HERE/opencode.jsonc"
 DEFAULT="$HERE/default"
 # Inspection commands use templates without creating user configuration.
 case "${1:-}:${2:-}" in
-  doctor:*|help:*|-h:*|--help:*|version:*|-v:*|--version:*|tools:plan|tools:status|tools:list|tools:)
+  doctor:*|help:*|-h:*|--help:*|logs:*|version:*|-v:*|--version:*|tools:plan|tools:status|tools:list|tools:)
     [[ -f "$MODELS" ]] || MODELS="$HERE/models.example.txt"
     [[ -f "$CONFIG" ]] || CONFIG="$HERE/opencode.example.jsonc"
     ;;
@@ -123,11 +125,11 @@ up() {
     if [[ "$driver" == qemu && "$(host_platform)" == wsl2 && ! -r /dev/kvm ]]; then
       echo 'WSL2: /dev/kvm unavailable; a local QEMU VM may be slow or unavailable. Prefer: cyber target vps <ssh-host>' >&2
     fi
-    echo "creating the ai-lab VM for the first time (a few minutes)..." >&2
+    echo "creating the CyberRoot VM for the first time (a few minutes)..." >&2
     limactl create --tty=false --vm-type="$driver" --name "$VM" "$HERE/lima.yaml" >&2
   fi
   if [[ "$(state)" != Running ]]; then
-    echo "starting ai-lab..." >&2
+    echo "starting the CyberRoot VM..." >&2
     limactl start --tty=false "$VM" >/dev/null 2>&1
   fi
   local i
@@ -190,11 +192,83 @@ oc_run() { if [[ -t 0 ]]; then oc run --standalone "$@" </dev/null; else oc run 
 
 stop_remote() { lsh sudo pkill -TERM -f "AILAB_RUN=[r]${RUN_ID#r}" 2>/dev/null || true; }
 
-# --- terminal look (colour only when stderr is a terminal and NO_COLOR is unset) ---
+# --- terminal look: green phosphor theme (colour only when stderr is a terminal and NO_COLOR is unset) ---
+# C_M bright green (logo, frames), C_C green (commands, prompt), C_T text green, C_D dark green (secondary text).
 if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
-  C_B=$'\e[1m'; C_D=$'\e[2m'; C_R=$'\e[31m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_M=$'\e[35m'; C_C=$'\e[36m'; C_0=$'\e[0m'
-else C_B=; C_D=; C_R=; C_G=; C_Y=; C_M=; C_C=; C_0=; fi
+  C_B=$'\e[1m'; C_R=$'\e[31m'; C_Y=$'\e[33m'; C_0=$'\e[0m'
+  if [[ "${TERM:-}" == *256color* || -n "${COLORTERM:-}" ]]; then
+    C_M=$'\e[38;5;46m'; C_C=$'\e[38;5;40m'; C_T=$'\e[38;5;34m'; C_G=$'\e[38;5;46m'; C_D=$'\e[38;5;28m'
+  else C_M=$'\e[92m'; C_C=$'\e[32m'; C_T=$'\e[32m'; C_G=$'\e[92m'; C_D=$'\e[2;32m'; fi
+else C_B=; C_D=; C_R=; C_G=; C_Y=; C_M=; C_C=; C_T=; C_0=; fi
 say()  { printf '%s\n' "$*" >&2; }
+
+# Logo (Calvin S): CYBER bright green, ROOT green. $1 = text beside the 2nd line, $2 = beside the 3rd.
+banner() {
+  local a=("╔═╗╦ ╦╔╗ ╔═╗╦═╗" "║  ╚╦╝╠╩╗║╣ ╠╦╝" "╚═╝ ╩ ╚═╝╚═╝╩╚═") b=("╦═╗╔═╗╔═╗╔╦╗" "╠╦╝║ ║║ ║ ║ " "╩╚═╚═╝╚═╝ ╩ ")
+  say "  $C_M$C_B${a[0]}$C_C${b[0]}$C_0"
+  say "  $C_M$C_B${a[1]}$C_C${b[1]}$C_0  ${1:-}"
+  say "  $C_M$C_B${a[2]}$C_C${b[2]}$C_0  ${2:-}"
+}
+
+usage() {
+  local C_B=$C_B C_D=$C_D C_M=$C_M C_C=$C_C C_T=$C_T C_0=$C_0
+  [[ -t 1 ]] || { C_B=; C_D=; C_M=; C_C=; C_T=; C_0=; }
+  row() { printf '  %s%-40s%s %s%s%s\n' "$C_C" "$1" "$C_0" "$C_T" "$2" "$C_0" >&2; }
+  sec() { printf '\n%s%s-- %s --%s %s%s%s\n' "$C_M" "$C_B" "$1" "$C_0" "$C_D" "${2:-}" "$C_0" >&2; }
+  say; banner "${C_D}v$(cat "$HERE/VERSION")${C_0}" "${C_T}isolated workspace for AI security agents${C_0}"
+  sec "START"
+  row 'cyber' 'interface: type a task, / shows commands'
+  row 'cyber "task"' 'run with the default model'
+  row 'cyber <shortcut> "task"' 'run with a model from models.txt'
+  row 'cyber -c "keep going"' 'continue the last session'
+  row 'cyber setup | doctor [--json|--live]' 'guided setup / read-only checks'
+  sec "SANDBOX"
+  row 'cyber up | down | status' 'start, stop, show the VM or SSH target'
+  row 'cyber sh | sync | reset' 'guest shell, push config, rebuild the VM'
+  row 'cyber target [local | vps <host>]' 'where tasks run (default: local VM)'
+  sec "MODELS"
+  row 'cyber list | use [shortcut]' 'shortcuts / show or set the default'
+  row 'cyber add <shortcut> <prov/model>' 'add a shortcut (cyber edit opens the file)'
+  row 'cyber models [provider]' 'every model OpenCode can see'
+  row 'cyber fallback [k1 k2 ...]' 'models tried in order on limit/error'
+  row 'cyber key <provider> | config' 'save an API key / edit provider config'
+  row 'cyber quota [on|off]' 'balances once / automatic checks'
+  sec "SESSIONS & OUTPUT"
+  row 'cyber sessions | resume' 'list sessions / open the picker'
+  row 'cyber logs [N | -f]' 'recent logs / open the Nth / follow the newest'
+  row 'cyber pull [all] | out | clean' 'copy results, open output, free disk'
+  sec "TOOLS" "optional, never installed automatically"
+  row 'cyber tools [status | install ...]' 'engine, kali, strix, shannon'
+  row 'cyber kali [--network] -- <cmd>' 'run a Kali CLI (offline by default)'
+  row 'cyber strix|shannon [--model k] -- ...' 'run with the selected model'
+  row 'cyber tui | run -m <model> "..."' "OpenCode's TUI / raw opencode run"
+  say
+  say "${C_D}claude/<model> shortcuts run Claude Code on the host, outside the sandbox.${C_0}"
+  say "${C_D}AILAB_ROUNDS auto-continue limit (12) · AILAB_THINKING=0 hides thinking · NO_COLOR disables colour${C_0}"
+}
+
+# cyber logs: list the newest runs, open the Nth (1 = newest) or follow the newest.
+logs_command() {
+  local files=() f i=0
+  # Names start with the run time (YYYYmmdd-HHMMSS-[pid-]model), so a reverse name sort is newest first.
+  while IFS= read -r f; do files+=("$f"); done < <(ls -1 "$OUT"/logs/*.log "$OUT"/logs/*.log.gz 2>/dev/null | sort -r)
+  (( ${#files[@]} )) || { say "no logs yet (they appear after the first task)"; return 0; }
+  case "${1:-}" in
+    -f) say "${C_D}following ${files[0]##*/} (Ctrl-C stops)${C_0}"; tail -n 40 -f "${files[0]}" ;;
+    [0-9]*)
+      f="${files[$(( $1 - 1 ))]:-}"; [[ "$1" =~ ^[0-9]+$ && "$1" -ge 1 && -n "$f" ]] || { say "no log #$1 (cyber logs)"; return 2; }
+      if [[ "$f" == *.gz ]]; then gzip -dc "$f"; else cat "$f"; fi | { if [[ -t 1 ]]; then less -R; else cat; fi } ;;
+    "")
+      for f in "${files[@]:0:15}"; do
+        i=$((i + 1)); local n="${f##*/}" model; n="${n%.gz}"; n="${n%.log}"; model="${n:16}"
+        [[ "$model" =~ ^[0-9]+-(.+)$ ]] && model="${BASH_REMATCH[1]}"
+        printf '  %s%2d%s  %s-%s-%s %s:%s  %s%-28s%s %s%6s%s\n' "$C_C" "$i" "$C_0" "${n:0:4}" "${n:4:2}" "${n:6:2}" "${n:9:2}" "${n:11:2}" \
+          "$C_B" "$model" "$C_0" "$C_D" "$(du -h "$f" | cut -f1)" "$C_0" >&2
+      done
+      say "${C_D}cyber logs N opens one · cyber logs -f follows the newest${C_0}" ;;
+    *) say "usage: cyber logs [N | -f]"; return 2 ;;
+  esac
+}
 fdur() { local s=$1; if (( s >= 60 )); then printf '%dm%02ds' $((s/60)) $((s%60)); else printf '%ds' "$s"; fi; }
 short_of() { awk -v m="$1" '$2==m && $1 !~ /^#/ {print $1; exit}' "$MODELS"; }
 
@@ -213,7 +287,7 @@ quota_auto_refresh() {
   return 0
 }
 
-# Fallback models, tried in order when a model hits a limit/error (ai-lab/fallback, else the free ones).
+# Fallback models, tried in order when a model hits a limit/error (fallback file, else the free ones).
 fallbacks() {
   local f; f="$(cat "$HERE/fallback" 2>/dev/null || true)"
   [[ -n "$f" ]] || f="glm-free ds-free"
@@ -337,7 +411,7 @@ resolve() {
   if [[ -n "$m" ]]; then echo "$m"; elif [[ "$1" =~ ^[A-Za-z0-9._-]+/[^[:space:]]+$ ]]; then echo "$1"; fi
 }
 
-# default model: ai-lab/default, else the first shortcut in models.txt
+# default model: the default file, else the first shortcut in models.txt
 default_model() {
   local d; d="$(cat "$DEFAULT" 2>/dev/null || true)"
   [[ -n "$d" ]] || d="$(awk '$1 !~ /^#/ && NF>=2 {print $2; exit}' "$MODELS")"
@@ -348,15 +422,15 @@ default_model() {
 OC_SUBCMDS=" upgrade update uninstall acp api debug auth mcp plugin models stats mini session service reload pair serve "
 
 case "${1:-}" in
-  version|--version|-v) printf 'CyberHutch %s\n' "$(cat "$HERE/VERSION")" ;;
+  version|--version|-v) printf 'CyberRoot %s\n' "$(cat "$HERE/VERSION")" ;;
   setup|doctor) command="$1"; shift; onboarding_command "$command" "$@" ;;
-  up)     up; sync_cfg; echo "ai-lab ready ($MODE${HOST:+ $HOST})" ;;
+  up)     up; sync_cfg; echo "CyberRoot ready ($MODE${HOST:+ $HOST})" ;;
   down)
     if [[ $MODE == vps ]]; then echo "vps mode: the VPS is not shut down from here (use the provider panel)"; exit 0; fi
-    pull 2>/dev/null || true; limactl stop "$VM" >/dev/null 2>&1; echo "ai-lab stopped" ;;
+    pull 2>/dev/null || true; limactl stop "$VM" >/dev/null 2>&1; echo "CyberRoot VM stopped" ;;
   status)
     echo "target: $MODE${HOST:+ $HOST}"
-    if [[ $MODE == vps ]]; then state; else limactl list "$VM" 2>/dev/null || echo "no ai-lab VM yet (cyber up)"; fi ;;
+    if [[ $MODE == vps ]]; then state; else limactl list "$VM" 2>/dev/null || echo "no CyberRoot VM yet (cyber up)"; fi ;;
   target)
     case "${2:-}" in
       "")    echo "$MODE${HOST:+ $HOST}" ;;
@@ -370,6 +444,13 @@ case "${1:-}" in
   pull)   ensure_up; pull "${2:-}"; echo "$OUT/work" ;;
   clean)  source "$HERE/ui.sh"; ui_clean ;;
   resume) source "$HERE/ui.sh"; ui_main resume ;;
+  sessions)
+    source "$HERE/ui.sh"; ui_sessions_refresh
+    [[ -s "$UI_SESS" ]] || { say "no sessions yet"; exit 0; }
+    awk -F'\t' -v c="$C_C" -v d="$C_D" -v z="$C_0" '{printf "  %s%2d%s  %-52.52s %s%s  %s%s\n", c, NR, z, $2, d, $3, $1, z}' "$UI_SESS" >&2
+    [[ "$(state)" == Running ]] || say "${C_D}cached list; the sandbox is not running${C_0}"
+    say "${C_D}cyber resume opens one · /1-/9 in the interface jumps to the newest${C_0}" ;;
+  logs)   logs_command "${2:-}" ;;
   out)    mkdir -p "$OUT"; open_output "$OUT" ;;
   list)   source "$HERE/ui.sh"; CUR_MODEL="$(default_model)"; quota_auto_refresh; ui_models_table ;;
   quota)  source "$HERE/ui.sh"; ui_quota "${2:-}" ;;
@@ -393,7 +474,7 @@ case "${1:-}" in
     if [[ "$(state)" == Running ]]; then sync_cfg; echo "sent to the VM"; fi ;;
   reset)
     [[ $MODE == local ]] || { echo "reset is only for the local VM" >&2; exit 1; }
-    read -r -p "The ai-lab VM will be deleted and rebuilt (including work/ inside it). Sure? [y/N] " a
+    read -r -p "The CyberRoot VM will be deleted and rebuilt (including work/ inside it). Sure? [y/N] " a
     [[ "$a" == y ]] || exit 1
     limactl delete -f "$VM"; up; sync_cfg ;;
   fallback)
@@ -401,11 +482,7 @@ case "${1:-}" in
     if [[ $# -eq 0 ]]; then fallbacks; exit 0; fi
     for k in "$@"; do [[ -n "$(resolve "$k")" ]] || { echo "unknown shortcut/model: $k" >&2; exit 2; }; done
     echo "$*" > "$HERE/fallback"; echo "fallback order: $*" ;;
-  -h|--help|help)
-    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
-    printf '\nOptional tools (never installed automatically):\n  cyber tools [status | install engine|kali|strix|shannon]\n  cyber kali [--network] -- <command>\n  cyber strix|shannon [--model shortcut] -- <tool arguments>\n'
-    printf '\nGetting started:\n  cyber setup                 guided target/model setup; optional tools unselected\n  cyber doctor [--json]        read-only local checks; never starts a VM\n  cyber doctor --live          also check a configured SSH target\n'
-    ;;
+  -h|--help|help) usage 2>&1 ;;
   run)
     shift; ensure_up; set +e; oc_run "$@"; rc=$?; set -e; pull; exit "$rc" ;;
   "")

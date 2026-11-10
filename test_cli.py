@@ -41,6 +41,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.state("Would you like me to continue?\n")[3], 1)
         self.assertEqual(self.state("Changes completed.\n")[3], 0)
 
+    def test_logs_lists_newest_first_and_opens_by_number(self):
+        with tempfile.TemporaryDirectory() as directory:
+            logs = Path(directory, "logs")
+            logs.mkdir()
+            Path(logs, "20261109-080000-old-model.log").write_text("old\n")
+            Path(logs, "20261110-090000-4242-provider-model.log").write_text("new\n")
+            harness = 'OUT="$TEST_OUT"; C_C=; C_B=; C_D=; C_0=\nsay() { printf "%s\\n" "$*" >&2; }\n' + function("logs_command")
+            listed = self.run_shell(harness + "\nlogs_command", TEST_OUT=directory)
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            rows = listed.stderr.splitlines()
+            self.assertIn("2026-11-10 09:00  provider-model", rows[0])
+            self.assertIn("2026-11-09 08:00  old-model", rows[1])
+            opened = self.run_shell(harness + "\nlogs_command 2", TEST_OUT=directory)
+            self.assertEqual(opened.stdout, "old\n")
+            self.assertEqual(self.run_shell(harness + "\nlogs_command 9", TEST_OUT=directory).returncode, 2)
+
     def test_pull_only_advances_after_success(self):
         with tempfile.TemporaryDirectory(dir=HERE) as directory:
             out = Path(directory)

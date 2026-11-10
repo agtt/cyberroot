@@ -1,4 +1,4 @@
-# ai-lab — sandbox VM for AI agents (Debian 13).
+# CyberRoot — sandbox VM for AI agents (Debian 13).
 # No host folders are shared; no route to the host's localhost, the home network or Tailscale.
 # Internet is open (model APIs + testing). The model runs as user "agent", which has no sudo.
 minimumLimaVersion: 2.0.0

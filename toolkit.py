@@ -22,7 +22,7 @@ STRIX_HASHES = {
     "aarch64": "9f4a826c5d1e76b5c503e3299807af8549acca2e03734b6603611be275917ede",
     "x86_64": "b8cd7e84d63cbeff6726301a9e08fddedf40fc6a4edcdb4edda8a853b3312de6",
 }
-KALI_IMAGE = "cyberhutch-kali:1"
+KALI_IMAGE = "cyberroot-kali:1"
 
 
 def install_plan(selected=None):
@@ -189,7 +189,7 @@ def selected_model(model, config, secrets):
 @contextmanager
 def model_command(name, args, model, config, secrets):
     env = runtime_env()
-    # Native variables must not override the model/key chosen in CyberHutch.
+    # Native variables must not override the model/key chosen in CyberRoot.
     for key in list(env):
         if key.startswith(("SHANNON_AI_", "STRIX_LLM")) or key in (
                 "LLM_API_KEY", "LLM_API_BASE", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY",
@@ -216,7 +216,7 @@ def model_command(name, args, model, config, secrets):
             extra = []
             if args and args[0] == "start":
                 if "--models-config" in args:
-                    raise ValueError("Remove --models-config to use the selected CyberHutch model; native tool configuration is available through cyber sh.")
+                    raise ValueError("Remove --models-config to use the selected CyberRoot model; native tool configuration is available through cyber sh.")
                 extra = ["--models-config", str(metadata)]
                 if "--follow" not in args and "-f" not in args:
                     extra.append("--follow")  # keep metadata alive until the worker finishes

@@ -1,4 +1,4 @@
-# ai-lab VM rules
+# CyberRoot VM rules
 
 - Reply in the language of the user's latest message, regardless of the language of these rules or the files. Keep code, commands, file names and `CYBER_DONE` unchanged.
 

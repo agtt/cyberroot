@@ -59,14 +59,14 @@ EOF
 chmod 755 /usr/local/sbin/ailab-idle
 cat > /etc/systemd/system/ailab-idle.service <<'EOF'
 [Unit]
-Description=ai-lab idle shutdown check
+Description=CyberRoot idle shutdown check
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/ailab-idle
 EOF
 cat > /etc/systemd/system/ailab-idle.timer <<'EOF'
 [Unit]
-Description=ai-lab idle shutdown check (every minute)
+Description=CyberRoot idle shutdown check (every minute)
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=1min

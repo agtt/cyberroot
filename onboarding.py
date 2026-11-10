@@ -159,7 +159,7 @@ def prompt(text, default=""):
 
 
 def setup(here, target):
-    print("CyberHutch setup — existing settings are kept; optional tools start unselected.\n")
+    print("CyberRoot setup — existing settings are kept; optional tools start unselected.\n")
     choice = prompt("Target: 1 local Lima VM, 2 SSH server", "2" if target.startswith("vps ") else "1")
     if choice not in ("1", "2"):
         raise ValueError("Choose 1 or 2.")
@@ -234,7 +234,7 @@ def main():
     if args.json:
         print(json.dumps(report))
     else:
-        print("CyberHutch doctor — read-only; no installs, VM startup or model requests\n")
+        print("CyberRoot doctor — read-only; no installs, VM startup or model requests\n")
         for item in report["checks"]:
             print(f'{item["status"].upper():5} {item["name"]}: {item["detail"]}')
         for name, state in report["tools"].items():

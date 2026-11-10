@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="350" viewBox="0 0 960 350" role="img" aria-labelledby="title desc">
-<title id="title">CyberHutch terminal walkthrough</title>
+<title id="title">CyberRoot terminal walkthrough</title>
 <desc id="desc">A scripted 25-second preview of diagnostics, optional install plans, model selection, tool help and report sync. No live scan or model result is shown.</desc>
 <style>text{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:17px;fill:#b9c7d9}.heading{font-size:13px;fill:#90a3bb}.command{fill:#81e6c2;font-size:19px}.note{font-size:12px;fill:#8a9bb0}@media(prefers-reduced-motion:reduce){.scene{display:none}.scene-0{display:block;opacity:1!important}}</style>
 <rect width="960" height="350" rx="16" fill="#101821"/>
 <path d="M0 44H960" stroke="#263443"/>
 <circle cx="25" cy="23" r="6" fill="#f07e78"/><circle cx="46" cy="23" r="6" fill="#e9c16a"/><circle cx="67" cy="23" r="6" fill="#79c7a7"/>
-<text x="95" y="28" class="heading">CyberHutch / isolated AI security workspace</text>
+<text x="95" y="28" class="heading">CyberRoot / isolated AI security workspace</text>
 <text x="931" y="28" text-anchor="end" class="heading">EARLY PREVIEW</text>
 <g class="scene scene-0" opacity="1"><animate attributeName="opacity" calcMode="discrete" values="1;0;0;0;0" keyTimes="0;0.2;0.4;0.6;0.8" dur="25s" repeatCount="indefinite"/>
 <text x="30" y="92" class="command">$ cyber doctor</text>

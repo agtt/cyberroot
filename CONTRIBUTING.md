@@ -1,4 +1,4 @@
-# Contributing to CyberHutch
+# Contributing to CyberRoot
 
 Small, focused changes are welcome: installation fixes, host adapters, optional tool integrations, diagnostics, model compatibility and documentation.
 
@@ -10,7 +10,7 @@ Small, focused changes are welcome: installation fixes, host adapters, optional 
 
 ```bash
 bash -n ailab ui.sh platform.sh tools.sh tool-deps.sh vm-setup.sh vps-setup.sh
-python3 -B -m unittest test_cli test_quota test_tools test_onboarding
+python3 -B -m unittest test_cli test_quota test_tools test_onboarding test_lineedit
 git diff --check
 ```
 

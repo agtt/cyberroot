@@ -1,4 +1,4 @@
-# CyberHutch
+# CyberRoot
 
 **An isolated workspace for AI security agents. Bring your own models; add Kali, Strix or Shannon only when you need them.**
 
@@ -6,9 +6,9 @@ Run OpenCode inside a separate Linux VM or a configured SSH target, switch model
 
 [Quick start](#quick-start) · [Examples](#three-practical-workflows) · [Optional tools](#optional-tools) · [Agent setup](AGENT-INSTALL.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
-![Scripted CyberHutch terminal walkthrough](docs/demo.svg)
+![Scripted CyberRoot terminal walkthrough](docs/demo.svg)
 
-*25-second scripted preview — no live scan, credentials or model results.* [Terminal cast](docs/demo.cast); optionally play it with `asciinema play docs/demo.cast`. No player package is required to use CyberHutch.
+*25-second scripted preview — no live scan, credentials or model results.* [Terminal cast](docs/demo.cast); optionally play it with `asciinema play docs/demo.cast`. No player package is required to use CyberRoot.
 
 **Early preview:** macOS Apple Silicon is the exercised host workflow. Linux/WSL2 adapters have offline tests; a real Linux/WSL2 host setup has not been validated. See [validation limits](#status-and-validation).
 
@@ -18,15 +18,15 @@ Run OpenCode inside a separate Linux VM or a configured SSH target, switch model
 - Developers who want their own API models and optional security tools in one terminal workflow.
 - Coding agents that need explicit, machine-readable installation steps.
 
-CyberHutch coordinates existing agents and tools. It does not provide its own vulnerability-discovery engine or guarantee that a model's finding is correct. Test only systems you own or are explicitly authorized to assess.
+CyberRoot coordinates existing agents and tools. It does not provide its own vulnerability-discovery engine or guarantee that a model's finding is correct. Test only systems you own or are explicitly authorized to assess.
 
 ## Quick start
 
 Host prerequisites: Bash, Git, Perl, Python 3, curl, OpenSSH and standard Unix tools. Local VMs require [Lima 2.0+](https://lima-vm.io); Linux/Intel hosts also need QEMU. `fzf` is optional; menus work without it. SSH targets do not need local Lima.
 
 ```bash
-git clone https://github.com/agtt/cyberhutch.git ~/cyber-cli
-cd ~/cyber-cli
+git clone https://github.com/agtt/cyberroot.git ~/cyberroot
+cd ~/cyberroot
 ./ailab doctor        # read-only checks; never boots a target or calls a model
 ./ailab setup         # choose local VM/SSH and model; optional tools start unselected
 ./ailab               # interactive interface
@@ -34,7 +34,7 @@ cd ~/cyber-cli
 
 The wizard saves target/model preferences, shows the proposed commands and asks before provisioning. Decline that last step to configure only. You can also use `./ailab up` for base setup directly. A first interactive launch without a saved default model opens the wizard automatically.
 
-For a convenient `cyber` command, add `alias cyber="$HOME/cyber-cli/ailab"` to your `~/.zshrc` or `~/.bashrc`, then reload that file. Agents should call `./ailab` directly; aliases are unnecessary.
+For a convenient `cyber` command, add `alias cyber="$HOME/cyberroot/ailab"` to your `~/.zshrc` or `~/.bashrc`, then reload that file. Agents should call `./ailab` directly; aliases are unnecessary.
 
 **Nothing optional is installed by base setup:** Kali, Strix, Shannon, their guest Docker/Node/Bun dependencies and quota network checks all require an explicit choice. Local templates create ignored `models.txt` and `opencode.jsonc` files on first use; existing settings are kept.
 
@@ -53,7 +53,7 @@ For a convenient `cyber` command, add `alias cyber="$HOME/cyber-cli/ailab"` to y
 | Small deliverables | Copy files up to three levels deep and under 10 MB; `pull all` is explicit |
 | Optional quota display | Supported account APIs show balances; unsupported quotas remain unknown |
 
-Strix/Shannon use their own execution loops, worker images, reports and exit codes. CyberHutch's OpenCode fallback/continuation loop does not wrap those upstream engines.
+Strix/Shannon use their own execution loops, worker images, reports and exit codes. CyberRoot's OpenCode fallback/continuation loop does not wrap those upstream engines.
 
 ## Three practical workflows
 
@@ -153,7 +153,9 @@ Quota checks are optional and off by default. `/quota` checks once; `/quota on` 
 | `/sh`, `!command` | Guest shell or one guest command |
 | `/claude` | Host Claude Code; outside the sandbox |
 
-Without the interface: `cyber "task"`, `cyber research "task"`, `cyber -c "continue"`, or pipe input with `cat notes.txt | cyber "summarize this"`. `cyber help` lists commands. `cyber --version` prints the CLI version without starting a guest.
+Typing `/` lists matching commands under the prompt as you type: `↑`/`↓` pick, `Tab` completes, `Enter` runs the highlighted command, `Esc` hides the list. Set `CYBER_PLAIN_INPUT=1` for the plain readline prompt.
+
+Without the interface: `cyber "task"`, `cyber research "task"`, `cyber -c "continue"`, or pipe input with `cat notes.txt | cyber "summarize this"`. `cyber help` lists commands, `cyber sessions` lists sessions and `cyber logs [N | -f]` lists, opens or follows run logs. `cyber --version` prints the CLI version without starting a guest.
 
 ## Diagnostics and remote targets
 
