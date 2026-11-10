@@ -8,6 +8,7 @@
 - `cyber cve` / `/cve`: recent NVD CVEs with CISA KEV marks, keyword/severity filters, CVE details and JSON output.
 - Themes (`cyber theme`, `/theme`): `root` (default), `matrix`, `mono`; the logo stays green.
 - Prompt: Ctrl-C clears the line and twice on an empty line exits; Ctrl-Z suspends.
+- Setup offers to add the `cyber` shell alias (asked first, never duplicated).
 - Interface prompt suggests matching `/` commands while typing; Tab completes, arrows pick.
 
 ## 0.1.0 — 2026-11-10 (preview)

@@ -78,6 +78,23 @@ class OnboardingTests(unittest.TestCase):
             self.assertIn("Optional integrations: none", output.getvalue())
             self.assertIn("Nothing downloaded or started", output.getvalue())
 
+    def test_cyber_command_is_offered_once_and_only_when_asked(self):
+        with tempfile.TemporaryDirectory() as home:
+            rc = Path(home, ".zshrc")
+            rc.write_text("export A=1")
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertFalse(onboarding.offer_cyber_command(HERE, ask=False, home=home, shell="/bin/zsh"))
+            self.assertIn("alias cyber=", out.getvalue())
+            self.assertEqual(rc.read_text(), "export A=1")
+            with patch("builtins.input", return_value=""), redirect_stdout(io.StringIO()):
+                self.assertTrue(onboarding.offer_cyber_command(HERE, ask=True, home=home, shell="/bin/zsh"))
+                self.assertFalse(onboarding.offer_cyber_command(HERE, ask=True, home=home, shell="/bin/zsh"))
+            self.assertEqual(rc.read_text().count("alias cyber="), 1)
+            self.assertTrue(rc.read_text().startswith("export A=1\n"))
+            with redirect_stdout(io.StringIO()):
+                onboarding.offer_cyber_command(HERE, ask=False, home=home, shell="/bin/bash")
+            self.assertFalse(Path(home, ".bashrc").exists())
+
     def test_new_provider_preserves_settings_and_never_overwrites_existing_provider(self):
         with tempfile.TemporaryDirectory(dir=HERE) as directory:
             root = self.fixture(directory)

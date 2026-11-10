@@ -158,6 +158,28 @@ def prompt(text, default=""):
     return input(f"{text}" + (f" [{default}]" if default else "") + ": ").strip() or default
 
 
+def offer_cyber_command(here, ask, home=None, shell=None):
+    """Offer the short `cyber` command: one alias line in the shell rc file, asked first and never duplicated."""
+    home = Path(home or Path.home())
+    shell = Path(os.environ.get("SHELL", "") if shell is None else shell).name
+    rc = home / (".zshrc" if shell == "zsh" else ".bashrc")
+    line = f"alias cyber={shlex.quote(str(Path(here).resolve() / 'ailab'))}"
+    try:
+        text = rc.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    if re.search(r"^\s*alias\s+cyber=", text, re.M):
+        print("\nStart it any time with: cyber")
+        return False
+    if ask and prompt(f"Add a short `cyber` command to ~/{rc.name}? Y/n", "y").lower() in ("y", "yes"):
+        with open(rc, "a", encoding="utf-8") as f:
+            f.write(("\n" if text and not text.endswith("\n") else "") + "\n# CyberRoot\n" + line + "\n")
+        print(f"Added. Open a new terminal (or run: source ~/{rc.name}), then just type: cyber")
+        return True
+    print(f"\nTip: for the short `cyber` command, add this line to ~/{rc.name}:\n  {line}\nUntil then use ./ailab")
+    return False
+
+
 def setup(here, target):
     print("CyberRoot setup — existing settings are kept; optional tools start unselected.\n")
     choice = prompt("Target: 1 local Lima VM, 2 SSH server", "2" if target.startswith("vps ") else "1")
@@ -215,6 +237,7 @@ def setup(here, target):
             subprocess.run([str(here / "ailab"), *command[1:]], cwd=here, check=True)
     else:
         print("Configuration saved. Nothing downloaded or started; run the commands above when ready.")
+    offer_cyber_command(here, ask=sys.stdin.isatty())
 
 
 def main():

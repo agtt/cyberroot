@@ -34,7 +34,7 @@ cd ~/cyberroot
 
 The wizard saves target/model preferences, shows the proposed commands and asks before provisioning. Decline that last step to configure only. You can also use `./ailab up` for base setup directly. A first interactive launch without a saved default model opens the wizard automatically.
 
-For a convenient `cyber` command, add `alias cyber="$HOME/cyberroot/ailab"` to your `~/.zshrc` or `~/.bashrc`, then reload that file. Agents should call `./ailab` directly; aliases are unnecessary.
+At the end, setup offers to add the short `cyber` command (one alias line in `~/.zshrc` or `~/.bashrc`, asked first). Open a new terminal and from then on just type `cyber`. To add it by hand: `alias cyber="$HOME/cyberroot/ailab"`. Agents should call `./ailab` directly; aliases are unnecessary.
 
 **Nothing optional is installed by base setup:** Kali, Strix, Shannon, their guest Docker/Node/Bun dependencies and quota network checks all require an explicit choice. Local templates create ignored `models.txt` and `opencode.jsonc` files on first use; existing settings are kept.
 
